@@ -3,6 +3,7 @@ import { db } from "@/firebaseConfig";
 import { doc, collection, addDoc, getDocs, getDoc, setDoc, updateDoc, query, where, deleteDoc, orderBy, limit } from "firebase/firestore";
 import { signInAnonymously, signOut } from "firebase/auth";
 import { auth } from "@/firebaseConfig";
+import { DonorData, PatientData, VeterinaryData, OrganisationData, UserData } from "@/types";
 
 // import current user context
 import { } from "@/context/UserContext"
@@ -271,7 +272,7 @@ export async function loginUserDatabase(role: string, loginId: string) {
     }
 }
 
-export async function getUserDataById(userId: string, role: string) {
+export async function getUserDataById(userId: string, role: string): Promise<UserData | null> {
     if (role == "patient") {
         try {
             const docRef = doc(db, "patients", userId);
@@ -279,7 +280,7 @@ export async function getUserDataById(userId: string, role: string) {
 
             if (docSnap.exists()) {
                 console.log("patient Data:", docSnap.data());
-                return { id: docSnap.id, ...docSnap.data() };
+                return { id: docSnap.id, ...docSnap.data() } as PatientData;
             } else {
                 console.log("No such patient found!");
                 return null;
@@ -296,7 +297,7 @@ export async function getUserDataById(userId: string, role: string) {
 
             if (docSnap.exists()) {
                 console.log("Donor Data:", docSnap.data());
-                return { id: docSnap.id, ...docSnap.data() };
+                return { id: docSnap.id, ...docSnap.data() } as DonorData;
             } else {
                 console.log("No such Donor found!");
                 return null;
@@ -313,7 +314,7 @@ export async function getUserDataById(userId: string, role: string) {
 
             if (docSnap.exists()) {
                 console.log("Veterinary Data:", docSnap.data());
-                return { id: docSnap.id, ...docSnap.data() };
+                return { id: docSnap.id, ...docSnap.data() } as VeterinaryData;
             } else {
                 console.log("No such veterinary found!");
                 return null;
@@ -330,7 +331,7 @@ export async function getUserDataById(userId: string, role: string) {
 
             if (docSnap.exists()) {
                 console.log("organisation Data:", docSnap.data());
-                return { id: docSnap.id, ...docSnap.data() };
+                return { id: docSnap.id, ...docSnap.data() } as OrganisationData;
             } else {
                 console.log("No such organisation found!");
                 return null;
@@ -340,6 +341,7 @@ export async function getUserDataById(userId: string, role: string) {
             return null;
         }
     }
+    return null;
 }
 
 
@@ -360,7 +362,7 @@ export async function updateUserData(
             success: true,
             message: "User data updated successfully"
         };
-    } catch (error) {
+    } catch (error: any) {
         console.error("Error updating user data:", error);
         return {
             success: false,
