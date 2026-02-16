@@ -148,11 +148,15 @@ export default function OnboardingDon() {
     const { userId, role, device, phone, setUser } = useUser();
     const router = useRouter();
 
-
+    // Import Cookies for logout
+    const Cookies = require("js-cookie");
 
     //Logout Function
     function handleLogout() {
-        localStorage.clear();
+        Cookies.remove("userId");
+        Cookies.remove("role");
+        Cookies.remove("onboarded");
+        Cookies.remove("phone");
         setUser(null, "guest", "guest");
         router.push("/");
     }
@@ -172,7 +176,7 @@ export default function OnboardingDon() {
     const form = useForm<z.infer<typeof formSchema>>({
         resolver: zodResolver(formSchema),
         defaultValues: {
-            phone: "",
+            phone: phone ?? "",
             email: "",
             onboarded: "yes",
             totalDonations: 0,
@@ -203,9 +207,9 @@ export default function OnboardingDon() {
     })
 
     useEffect(() => {
-        if (phone) {
+        if (phone !== undefined && phone !== null) {
             form.reset({
-                phone: phone,
+                phone: phone || "",
                 email: "",
                 onboarded: "yes",
                 totalDonations: 0,

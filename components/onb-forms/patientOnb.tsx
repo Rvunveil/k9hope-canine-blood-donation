@@ -1,7 +1,7 @@
 
 //Basic Imports
-// @ts-nocheck
 "use client";
+import Cookies from "js-cookie";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import React from "react";
@@ -71,14 +71,15 @@ const client = new UploadClient({ publicKey: process.env.NEXT_PUBLIC_UPLOADCARE_
 const dobSchema = z
     .string()
     .refine((dateString) => {
+        if (!dateString) return false;
         const date = parse(dateString, "yyyy-MM-dd", new Date());
         const age = differenceInYears(new Date(), date);
-        return age >= 5 && age <= 65;
-    }, { message: "Age must be between 5 and 65 years." });
+        return age >= 0 && age <= 20;
+    }, { message: "Dog's age must be between 0 and 20 years." });
 
 const formSchema = z.object({
     phone: z.string(),
-    email: z.string(),
+    email: z.string().email("Invalid email address").min(1, "Email is required"),
     p_name: z.string().min(1),
     // p_logo_url: z.string().optional(),
     p_dob: dobSchema,
@@ -134,7 +135,13 @@ export default function OnboardingPat() {
 
 
     //Logout Function
+
     function handleLogout() {
+        Cookies.remove("userId");
+        Cookies.remove("role");
+        Cookies.remove("onboarded");
+        Cookies.remove("phone");
+        localStorage.clear();
         setUser(null, "guest", "guest");
         router.push("/");
     }
@@ -155,9 +162,21 @@ export default function OnboardingPat() {
     const form = useForm<z.infer<typeof formSchema>>({
         resolver: zodResolver(formSchema),
         defaultValues: {
-            phone: "",
+            phone: patient?.phone ?? "", // Always string, never undefined
+            email: "",
             onboarded: "yes",
-
+            p_name: "",
+            p_dob: "",
+            p_gender: "",
+            p_bloodgroup: "",
+            p_weight_kg: 0,
+            emergency_contact_name: "",
+            emergency_contact_phone: "",
+            p_city: "",
+            p_pincode: "",
+            p_reasonRequirment: "",
+            p_urgencyRequirment: "",
+            p_quantityRequirment: "",
             p_isMedicalCondition: "no",
             p_isAllergy: "no",
             p_isLastTransfusion: "no",
@@ -174,49 +193,52 @@ export default function OnboardingPat() {
 
 
     useEffect(() => {
-        if (patient?.phone) {
-            form.reset({ phone: patient.phone, onboarded: "yes" });
+        if (patient?.phone !== undefined) {
+            form.reset({
+                ...form.getValues(), // Keep other field values
+                phone: patient.phone || "",
+                onboarded: "yes"
+            });
         }
-
-    }, [patient?.phone, form]);
+    }, [patient?.phone]);
 
 
     // SUBMIT FORM FUNCTION
-    function onSubmit(values: z.infer<typeof formSchema>) {
-
+    // SUBMIT FORM FUNCTION
+    async function onSubmit(values: z.infer<typeof formSchema>) {
         try {
             console.log("Submitting patient onboarding:", values);
-
-            // show loading
             setIsLoading(true);
 
-            // Takes values JSON object and update it in database
             const formValues = form.getValues();
 
+            // Sanitize data
             const sanitizedData = {
                 ...Object.fromEntries(
-                    Object.entries(form.getValues()).filter(([_, value]) => {
+                    Object.entries(formValues).filter(([_, value]) => {
                         return (
                             value !== undefined &&
                             typeof value !== "function" &&
                             (typeof value !== "object" || value === null || Array.isArray(value))
                         );
                     })
-                )
+                ),
+                onboarded: "yes", // CRITICAL: Ensure onboarded is "yes"
+                updatedAt: new Date()
             };
 
             // Update patients collection
-            updateUserData("patients", userId, sanitizedData)
-                .then(response => {
-                    if (response.success) {
-                        console.log("Patient data updated successfully:", response.message);
-                    } else {
-                        console.error("Error updating patient:", response.message);
-                        return;
-                    }
-                });
+            const patientResponse = await updateUserData("patients", userId, sanitizedData);
 
-            // Also update users collection with onboarded: 'yes'
+            if (!patientResponse.success) {
+                setIsLoading(false);
+                alert("Error updating patient data: " + patientResponse.message);
+                return;
+            }
+
+            console.log("Patient data updated successfully:", patientResponse.message);
+
+            // Update users collection
             const userData = {
                 role: "patient",
                 onboarded: "yes",
@@ -225,25 +247,29 @@ export default function OnboardingPat() {
                 updatedAt: new Date()
             };
 
-            updateUserData("users", userId, userData)
-                .then(response => {
-                    if (response.success) {
-                        console.log("User collection updated successfully:", response.message);
-                    } else {
-                        console.error("Error updating user collection:", response.message);
-                    }
-                });
+            const userResponse = await updateUserData("users", userId, userData);
 
-            // Update UserContext immediately to redirect to dashboard
-            setUser(userId, "patient", "yes");
+            if (!userResponse.success) {
+                setIsLoading(false);
+                alert("Error updating user collection: " + userResponse.message);
+                return;
+            }
 
-            // Hide loading
-            setIsLoading(false);
+            console.log("User collection updated successfully:", userResponse.message);
+
+            // CRITICAL: Update context AFTER both DB updates succeed
+            setUser(userId, "patient", "yes", formValues.phone);
+
+            // Wait for state to propagate
+            await new Promise(resolve => setTimeout(resolve, 300));
+
+            // Navigate to dashboard
+            router.push("/app/p/dashboard");
 
         } catch (error) {
             setIsLoading(false);
-            console.error("Form submission error", error);
-            alert("Failed to submit form. Please try again.");
+            console.error("Form submission error:", error);
+            alert("Failed to submit form. Please try again. Error: " + (error?.message || "Unknown error"));
         }
     }
 
@@ -300,7 +326,7 @@ export default function OnboardingPat() {
                         <h1 className="text-[20px] font-bold text-center">Complete your canine companion's profile for our veterinary network.</h1>
 
                         <h1 className="font-bold border-b-2 border-blue-600 pt-4 pb-2">🐕 Canine Companion Profile</h1>
-                        
+
                         {/* Dog Name Field - Added at top */}
                         <FormField
                             control={form.control}
@@ -329,13 +355,11 @@ export default function OnboardingPat() {
                                 <FormItem className="flex flex-col items-start">
                                     <FormLabel>🔒 Owner's Phone *</FormLabel>
                                     <FormControl className="w-full">
-                                        <PhoneInput
-
-                                            value={patient?.phone ?? "Loading..."}
+                                        <Input
+                                            value={patient?.phone ?? ""}
                                             disabled
-
+                                            className="bg-gray-100 dark:bg-gray-900"
                                             {...field}
-
                                         />
                                     </FormControl>
                                     <FormDescription>Login with new phone if you want to change this right now.</FormDescription>
@@ -361,7 +385,7 @@ export default function OnboardingPat() {
                                 </FormItem>
                             )}
                         />
-                                            <FormField
+                        <FormField
                             control={form.control}
                             name="p_dob"
                             render={({ field }) => (
@@ -661,6 +685,44 @@ export default function OnboardingPat() {
 
                         <FormField
                             control={form.control}
+                            name="p_doctorName"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Attending Veterinarian Name (Optional)</FormLabel>
+                                    <FormControl>
+                                        <Input
+                                            placeholder="Dr. Smith"
+                                            type="text"
+                                            {...field}
+                                        />
+                                    </FormControl>
+                                    <FormDescription>Name of the vet treating your dog.</FormDescription>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
+
+                        <FormField
+                            control={form.control}
+                            name="p_hospitalName"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel>Hospital/Clinic Name (Optional)</FormLabel>
+                                    <FormControl>
+                                        <Input
+                                            placeholder="Chennai Veterinary Hospital"
+                                            type="text"
+                                            {...field}
+                                        />
+                                    </FormControl>
+                                    <FormDescription>Name of the hospital or clinic.</FormDescription>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
+
+                        <FormField
+                            control={form.control}
                             name="p_isMedicalCondition"
                             render={({ field }) => (
                                 <FormItem className="space-y-3">
@@ -830,10 +892,11 @@ export default function OnboardingPat() {
 
                         <br></br>
                         <Button
+                            type="submit"
                             className="w-full bg-accent pt-6 pb-6 submit-button"
-                            onClick={() => form.handleSubmit(onSubmit)()}
+                            disabled={isLoading}
                         >
-                            Submit
+                            {isLoading ? "Submitting..." : "Submit Patient Registration"}
                         </Button>
 
                     </form>

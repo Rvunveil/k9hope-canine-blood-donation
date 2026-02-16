@@ -45,53 +45,69 @@ export async function loginUserDatabase(role: string, loginId: string) {
 
                 try {
                     const querySnapshot = await getDocs(q);
-                    console.log("Firestore Query Result:", querySnapshot.docs.map(doc => doc.data()));
 
-                    // If User exists in users collection, return existing userId
+                    // Check if user exists
                     if (!querySnapshot.empty) {
                         const existingUserId = querySnapshot.docs[0].id;
-                        console.log("User exists, returning userId:", existingUserId);
+                        const userData = querySnapshot.docs[0].data();
+
+                        console.log("Existing user found:", existingUserId);
+
+                        // Check if patient document exists
+                        const patientDocRef = doc(db, "patients", existingUserId);
+                        const patientSnap = await getDoc(patientDocRef);
+
+                        if (!patientSnap.exists()) {
+                            // User exists but not as patient - create patient profile
+                            console.log("Creating patient profile for existing user");
+                            await setDoc(patientDocRef, {
+                                phone: loginId.toLowerCase().trim(),
+                                onboarded: "no",
+                                createdAt: new Date(),
+                                role: "individual"
+                            }, { merge: true });
+
+                            // Update users collection to add patient role
+                            const currentRoles = userData.roles || [userData.role];
+                            if (!currentRoles.includes("patient")) {
+                                await updateDoc(querySnapshot.docs[0].ref, {
+                                    roles: [...currentRoles, "patient"],
+                                    updatedAt: new Date()
+                                });
+                            }
+                        }
+
                         return existingUserId;
                     }
-                } catch (queryError) {
-                    console.error("Error querying users collection:", queryError);
-                    console.error("Query error details:", JSON.stringify(queryError, null, 2));
-                    // Continue to user creation even if query fails
-                }
 
-                // If User does NOT exist, create a new one in users collection
-                const userId = generateUserId();
-                console.log("Creating new user with ID:", userId);
+                    // New user - create both users and patients documents
+                    const userId = generateUserId();
+                    console.log("Creating new user with ID:", userId);
 
-                try {
                     const userDocRef = doc(db, "users", userId);
-
                     await setDoc(userDocRef, {
                         phone: loginId.toLowerCase().trim(),
-                        role: "patient",
+                        roles: ["patient"], // Array of roles
+                        role: "patient", // Primary role for backward compatibility
                         onboarded: "no",
                         createdAt: new Date(),
                         updatedAt: new Date()
-                    }, { merge: true });
+                    });
 
-                    console.log("Successfully created user in users collection");
-
-                    // Also create entry in patients collection for detailed data
                     const patientDocRef = doc(db, "patients", userId);
                     await setDoc(patientDocRef, {
                         phone: loginId.toLowerCase().trim(),
                         onboarded: "no",
                         createdAt: new Date(),
                         role: "individual"
-                    }, { merge: true });
+                    });
 
-                    console.log("New user created with ID:", userId);
-                    return userId; // Always return userId, never null
-                } catch (createError) {
-                    console.error("Error creating user:", createError);
-                    console.error("Create error details:", JSON.stringify(createError, null, 2));
-                    // Even if Firestore fails, return generated userId
-                    console.log("Returning generated userId despite Firestore error:", userId);
+                    console.log("New patient user created with ID:", userId);
+                    return userId;
+
+                } catch (error) {
+                    console.error("Error in patient login:", error);
+                    const userId = generateUserId();
                     return userId;
                 }
             }
@@ -102,51 +118,69 @@ export async function loginUserDatabase(role: string, loginId: string) {
 
                 try {
                     const querySnapshot = await getDocs(q);
-                    console.log("Firestore Query Result:", querySnapshot.docs.map(doc => doc.data()));
 
-                    // ✅ If User exists in users collection, return existing userId
+                    // Check if user exists
                     if (!querySnapshot.empty) {
                         const existingUserId = querySnapshot.docs[0].id;
-                        console.log("User exists, returning userId:", existingUserId);
+                        const userData = querySnapshot.docs[0].data();
+
+                        console.log("Existing user found:", existingUserId);
+
+                        // Check if donor document exists (donors collection, not canines)
+                        const donorDocRef = doc(db, "donors", existingUserId);
+                        const donorSnap = await getDoc(donorDocRef);
+
+                        if (!donorSnap.exists()) {
+                            // User exists but not as donor - create donor profile
+                            console.log("Creating donor profile for existing user");
+                            await setDoc(donorDocRef, {
+                                phone: loginId.toLowerCase().trim(),
+                                onboarded: "no",
+                                createdAt: new Date(),
+                                role: "individual"
+                            }, { merge: true });
+
+                            // Update users collection to add donor role
+                            const currentRoles = userData.roles || [userData.role];
+                            if (!currentRoles.includes("donor")) {
+                                await updateDoc(querySnapshot.docs[0].ref, {
+                                    roles: [...currentRoles, "donor"],
+                                    updatedAt: new Date()
+                                });
+                            }
+                        }
+
                         return existingUserId;
                     }
-                } catch (queryError) {
-                    console.error("Error querying users collection:", queryError);
-                    // Continue to user creation even if query fails
-                }
 
-                // ❌ If User does NOT exist, create a new one in users collection
-                const userId = generateUserId();
-                console.log("Creating new user with ID:", userId);
+                    // New user - create both users and donors documents
+                    const userId = generateUserId();
+                    console.log("Creating new user with ID:", userId);
 
-                try {
                     const userDocRef = doc(db, "users", userId);
-
                     await setDoc(userDocRef, {
                         phone: loginId.toLowerCase().trim(),
-                        role: "donor",
+                        roles: ["donor"], // Array of roles
+                        role: "donor", // Primary role for backward compatibility
                         onboarded: "no",
                         createdAt: new Date(),
                         updatedAt: new Date()
-                    }, { merge: true });
+                    });
 
-                    console.log("Successfully created user in users collection");
-
-                    // Also create entry in canines collection for detailed data
-                    const canineDocRef = doc(db, "canines", userId);
-                    await setDoc(canineDocRef, {
+                    const donorDocRef = doc(db, "donors", userId);
+                    await setDoc(donorDocRef, {
                         phone: loginId.toLowerCase().trim(),
                         onboarded: "no",
                         createdAt: new Date(),
                         role: "individual"
-                    }, { merge: true });
+                    });
 
-                    console.log("New user created with ID:", userId);
-                    return userId; // Always return userId, never null
-                } catch (createError) {
-                    console.error("Error creating user:", createError);
-                    // Even if Firestore fails, return the generated userId
-                    console.log("Returning generated userId despite Firestore error:", userId);
+                    console.log("New donor user created with ID:", userId);
+                    return userId;
+
+                } catch (error) {
+                    console.error("Error in donor login:", error);
+                    const userId = generateUserId();
                     return userId;
                 }
             }
@@ -482,16 +516,27 @@ export async function getUrgentRequests(donorCity?: string, donorBloodType?: str
     try {
         const patientsRef = collection(db, "patients");
 
-        // Query for onboarded patients
+        // FIREBASE INDEX NOTE:
+        // To enable server-side sorting, create composite index:
+        // Collection: patients | Fields: onboarded (Ascending), createdAt (Descending)
+        // For now, using client-side sorting to avoid index requirement
+
+        // Query for onboarded patients (without orderBy to avoid composite index requirement)
         const q = query(
             patientsRef,
             where("onboarded", "==", "yes"),
-            orderBy("createdAt", "desc"),
             limit(50)
         );
 
         const snapshot = await getDocs(q);
         let requests = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
+
+        // Client-side sorting by createdAt (descending)
+        requests = requests.sort((a: any, b: any) => {
+            const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0);
+            const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(0);
+            return dateB.getTime() - dateA.getTime();
+        });
 
         // Client-side filtering for urgency if requested
         if (onlyUrgent) {

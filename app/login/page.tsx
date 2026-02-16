@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { Moon, Sun, ArrowLeft } from "lucide-react"
@@ -21,10 +21,9 @@ import PEPhoneButton from "@/components/custom/PEPhoneButton"
 import PEEmailButton from "@/components/custom/PEEmailButton"
 
 //User Account 
-import { useEffect } from "react";
 import { useUser } from "@/context/UserContext";
 import { useRouter } from "next/navigation";
-import { loginUserDatabase } from "@/firebaseFunctions";
+import { loginUserDatabase, updateUserData } from "@/firebaseFunctions";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/firebaseConfig";
 
@@ -46,31 +45,58 @@ function generateUserId(): string {
   return userId.join("-");
 }
 
-async function getOnboardedStatus(userId: string) {
+async function getOnboardedStatus(userId: string, roleToCheck: string) {
   try {
-    // Add null checks to prevent indexOf error
     if (!userId) {
-      console.log("User ID is null - redirecting to onboarding");
-      return { exists: false, role: null, onboarded: false };
+      return { exists: false, role: null, onboarded: "no", hasRole: false };
     }
 
-    const userDocRef = doc(db, "users", userId); // Check users collection
-    const userDocSnap = await getDoc(userDocRef); // Fetch the document
+    // Check users collection for main account
+    const userDocRef = doc(db, "users", userId);
+    const userDocSnap = await getDoc(userDocRef);
 
-    if (userDocSnap.exists()) {
-      const userData = userDocSnap.data();
-      return {
-        exists: true,
-        role: userData.role || null,
-        onboarded: userData.onboarded ?? false
-      };
-    } else {
-      console.log("User document does not exist - new user");
-      return { exists: false, role: null, onboarded: false };
+    if (!userDocSnap.exists()) {
+      return { exists: false, role: null, onboarded: "no", hasRole: false };
     }
+
+    const userData = userDocSnap.data();
+
+    // Check if user has the requested role
+    const userRoles = userData.roles || [userData.role];
+    const hasRole = userRoles.includes(roleToCheck);
+
+    // Check onboarded status in role-specific collection
+    let roleOnboarded = "no";
+    let roleCollection = "";
+
+    switch (roleToCheck) {
+      case "patient": roleCollection = "patients"; break;
+      case "donor": roleCollection = "donors"; break;
+      case "veterinary": roleCollection = "veterinaries"; break;
+      case "organisation": roleCollection = "organisations"; break;
+      default: roleCollection = "users";
+    }
+
+    if (roleCollection && roleCollection !== "users") {
+      const roleDocRef = doc(db, roleCollection, userId);
+      const roleDocSnap = await getDoc(roleDocRef);
+
+      if (roleDocSnap.exists()) {
+        const roleData = roleDocSnap.data();
+        roleOnboarded = roleData.onboarded === "yes" ? "yes" : "no";
+      }
+    }
+
+    return {
+      exists: true,
+      role: roleToCheck,
+      onboarded: roleOnboarded,
+      hasRole: hasRole,
+      allRoles: userRoles
+    };
   } catch (error) {
     console.error("Error fetching user status:", error);
-    return { exists: false, role: null, onboarded: false };
+    return { exists: false, role: null, onboarded: "no", hasRole: false };
   }
 }
 
@@ -80,8 +106,7 @@ const PatientContent: React.FC = () => {
   const { setUser } = useUser();
   const router = useRouter();
   const [content, setContent] = useState<React.ReactElement | null>(null);
-
-  let isProcessing = false;
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const handleVerificationSuccess = async (data: {
     user_country_code: string;
@@ -90,7 +115,7 @@ const PatientContent: React.FC = () => {
     user_last_name: string;
   }) => {
     if (isProcessing) return;
-    isProcessing = true;
+    setIsProcessing(true);
 
     setContent(<HeartLoading />);
 
@@ -110,49 +135,30 @@ const PatientContent: React.FC = () => {
         console.log("Backend returned null, using temporary ID:", finalUserId);
       }
 
-      const userStatus = await getOnboardedStatus(finalUserId);
+      const userStatus = await getOnboardedStatus(finalUserId, "patient");
       console.log("getOnboardedStatus returned:", userStatus);
 
-      // Check if user exists in users collection
-      if (!userStatus.exists) {
-        // New User - redirect to onboarding with intended role
-        console.log("New user detected, redirecting to onboarding");
-        setUser(finalUserId, intendedRole as any, "no", data.user_country_code + data.user_phone_number);
-        isProcessing = false;
+      // If user doesn't have patient role yet (new to this role)
+      if (!userStatus.hasRole) {
+        console.log("User doesn't have patient role, will be created by loginUserDatabase");
+        // loginUserDatabase already created it, now redirect to onboarding
+        setUser(finalUserId, "patient", "no", data.user_country_code + data.user_phone_number);
+        setIsProcessing(false);
         router.replace("/onboarding");
         return;
       }
 
-      // Old User - check onboarding status strictly
-      const userRole = userStatus.role;
+      // User has patient role - check if onboarded
       const isOnboarded = userStatus.onboarded;
-      console.log("Existing user detected - role:", userRole, "onboarded:", isOnboarded);
+      console.log("User has patient role, onboarded status:", isOnboarded);
 
-      setUser(finalUserId, userRole, isOnboarded === "yes" ? "yes" : "no", data.user_country_code + data.user_phone_number);
-      isProcessing = false;
+      setUser(finalUserId, "patient", isOnboarded === "yes" ? "yes" : "no", data.user_country_code + data.user_phone_number);
+      setIsProcessing(false);
 
-      // STRICT CHECK: Only redirect to dashboard if onboarded === 'yes'
       if (isOnboarded === "yes") {
-        // Redirect to role-specific dashboard
-        switch (userRole) {
-          case "patient":
-            router.push("/app/p/dashboard");
-            break;
-          case "donor":
-            router.push("/app/d/dashboard");
-            break;
-          case "veterinary":
-            router.push("/app/h/dashboard");
-            break;
-          case "organisation":
-            router.push("/app/o/dashboard");
-            break;
-          default:
-            router.push("/app");
-        }
+        router.push("/app/p/dashboard");
       } else {
-        // FORCE ONBOARDING: If document missing OR onboarded is not 'yes'
-        console.log("User not fully onboarded, redirecting to onboarding");
+        console.log("Patient not fully onboarded, redirecting to onboarding");
         router.push("/onboarding");
       }
 
@@ -166,7 +172,7 @@ const PatientContent: React.FC = () => {
       console.log("Patient login failed, using fallback ID:", fallbackUserId);
 
       setUser(fallbackUserId, "guest", "no");
-      isProcessing = false;
+      setIsProcessing(false);
       router.replace("/onboarding");
     }
   };
@@ -187,7 +193,9 @@ const PatientContent: React.FC = () => {
     )
   }
 
-  useState(() => setContent(defaultUI()));
+  useEffect(() => {
+    setContent(defaultUI());
+  }, []);
 
   return <>{content}</>;
 };
@@ -198,8 +206,7 @@ const DonorContent: React.FC = () => {
   const { setUser } = useUser();
   const router = useRouter();
   const [content, setContent] = useState<React.ReactElement | null>(null);
-
-  let isProcessing = false;
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const handleVerificationSuccess = async (data: {
     user_country_code: string;
@@ -208,7 +215,7 @@ const DonorContent: React.FC = () => {
     user_last_name: string;
   }) => {
     if (isProcessing) return;
-    isProcessing = true;
+    setIsProcessing(true);
 
     setContent(<HeartLoading />);
 
@@ -228,49 +235,30 @@ const DonorContent: React.FC = () => {
         console.log("Backend returned null, using temporary ID:", finalUserId);
       }
 
-      const userStatus = await getOnboardedStatus(finalUserId);
+      const userStatus = await getOnboardedStatus(finalUserId, "donor");
       console.log("getOnboardedStatus returned:", userStatus);
 
-      // Check if user exists in users collection
-      if (!userStatus.exists) {
-        // New User - redirect to onboarding with intended role
-        console.log("New user detected, redirecting to onboarding");
-        setUser(finalUserId, intendedRole as any, "no", data.user_country_code + data.user_phone_number);
-        isProcessing = false;
+      // If user doesn't have donor role yet (new to this role)
+      if (!userStatus.hasRole) {
+        console.log("User doesn't have donor role, will be created by loginUserDatabase");
+        // loginUserDatabase already created it, now redirect to onboarding
+        setUser(finalUserId, "donor", "no", data.user_country_code + data.user_phone_number);
+        setIsProcessing(false);
         router.replace("/onboarding");
         return;
       }
 
-      // Old User - redirect to specific dashboard based on role
-      const userRole = userStatus.role;
+      // User has donor role - check if onboarded
       const isOnboarded = userStatus.onboarded;
-      console.log("Existing user detected - role:", userRole, "onboarded:", isOnboarded);
+      console.log("User has donor role, onboarded status:", isOnboarded);
 
-      setUser(finalUserId, userRole, isOnboarded === "yes" ? "yes" : "no", data.user_country_code + data.user_phone_number);
-      isProcessing = false;
+      setUser(finalUserId, "donor", isOnboarded === "yes" ? "yes" : "no", data.user_country_code + data.user_phone_number);
+      setIsProcessing(false);
 
-      // STRICT CHECK: Only redirect to dashboard if onboarded === 'yes'
       if (isOnboarded === "yes") {
-        // Redirect to role-specific dashboard
-        switch (userRole) {
-          case "patient":
-            router.push("/app/p/dashboard");
-            break;
-          case "donor":
-            router.push("/app/d/dashboard");
-            break;
-          case "veterinary":
-            router.push("/app/h/dashboard");
-            break;
-          case "organisation":
-            router.push("/app/o/dashboard");
-            break;
-          default:
-            router.push("/app");
-        }
+        router.push("/app/d/dashboard");
       } else {
-        // FORCE ONBOARDING: If document missing OR onboarded is not 'yes'
-        console.log("User not fully onboarded, redirecting to onboarding");
+        console.log("Donor not fully onboarded, redirecting to onboarding");
         router.push("/onboarding");
       }
 
@@ -281,7 +269,7 @@ const DonorContent: React.FC = () => {
       console.log("Login failed, using fallback ID:", fallbackUserId);
 
       setUser(fallbackUserId, "guest", "no");
-      isProcessing = false;
+      setIsProcessing(false);
       router.replace("/onboarding");
     }
   };
@@ -300,7 +288,9 @@ const DonorContent: React.FC = () => {
     );
   }
 
-  useState(() => setContent(defaultUI()));
+  useEffect(() => {
+    setContent(defaultUI());
+  }, []);
 
   return <>{content}</>;
 };
@@ -314,14 +304,13 @@ const VeterinaryContent: React.FC = () => {
   const { setUser } = useUser();
   const router = useRouter();
   const [content, setContent] = useState<React.ReactElement | null>(null);
-
-  let isProcessing = false;
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const handleVerificationSuccess = async (data: {
     user_email: string;
   }) => {
     if (isProcessing) return;
-    isProcessing = true;
+    setIsProcessing(true);
 
     setContent(<HeartLoading />);
 
@@ -341,7 +330,7 @@ const VeterinaryContent: React.FC = () => {
         console.log("Backend returned null, using temporary ID:", finalUserId);
       }
 
-      const userStatus = await getOnboardedStatus(finalUserId);
+      const userStatus = await getOnboardedStatus(finalUserId, "veterinary");
       console.log("getOnboardedStatus returned:", userStatus);
 
       // Check if user exists in users collection
@@ -349,7 +338,7 @@ const VeterinaryContent: React.FC = () => {
         // New User - redirect to onboarding with intended role
         console.log("New user detected, redirecting to onboarding");
         setUser(finalUserId, intendedRole as any, "no");
-        isProcessing = false;
+        setIsProcessing(false);
         router.replace("/onboarding");
         return;
       }
@@ -360,7 +349,7 @@ const VeterinaryContent: React.FC = () => {
       console.log("Existing user detected - role:", userRole, "onboarded:", isOnboarded);
 
       setUser(finalUserId, userRole, isOnboarded === "yes" ? "yes" : "no");
-      isProcessing = false;
+      setIsProcessing(false);
 
       // STRICT CHECK: Only redirect to dashboard if onboarded === 'yes'
       if (isOnboarded === "yes") {
@@ -394,7 +383,7 @@ const VeterinaryContent: React.FC = () => {
       console.log("Login failed, using fallback ID:", fallbackUserId);
 
       setUser(fallbackUserId, "guest", "no");
-      isProcessing = false;
+      setIsProcessing(false);
       router.replace("/onboarding");
     }
   };
@@ -415,7 +404,10 @@ const VeterinaryContent: React.FC = () => {
       </div>
     );
   }
-  useState(() => setContent(defaultUI()));
+
+  useEffect(() => {
+    setContent(defaultUI());
+  }, []);
 
   return <>{content}</>;
 };
@@ -427,14 +419,13 @@ const OrganisationContent: React.FC = () => {
   const { setUser } = useUser();
   const router = useRouter();
   const [content, setContent] = useState<React.ReactElement | null>(null);
-
-  let isProcessing = false;
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const handleVerificationSuccess = async (data: {
     user_email: string;
   }) => {
     if (isProcessing) return;
-    isProcessing = true;
+    setIsProcessing(true);
 
     setContent(<HeartLoading />);
 
@@ -454,7 +445,7 @@ const OrganisationContent: React.FC = () => {
         console.log("Backend returned null, using temporary ID:", finalUserId);
       }
 
-      const userStatus = await getOnboardedStatus(finalUserId);
+      const userStatus = await getOnboardedStatus(finalUserId, "organisation");
       console.log("getOnboardedStatus returned:", userStatus);
 
       // Check if user exists in users collection
@@ -462,7 +453,7 @@ const OrganisationContent: React.FC = () => {
         // New User - redirect to onboarding with intended role
         console.log("New user detected, redirecting to onboarding");
         setUser(finalUserId, intendedRole as any, "no");
-        isProcessing = false;
+        setIsProcessing(false);
         router.replace("/onboarding");
         return;
       }
@@ -473,7 +464,7 @@ const OrganisationContent: React.FC = () => {
       console.log("Existing user detected - role:", userRole, "onboarded:", isOnboarded);
 
       setUser(finalUserId, userRole, isOnboarded === "yes" ? "yes" : "no");
-      isProcessing = false;
+      setIsProcessing(false);
 
       // STRICT CHECK: Only redirect to dashboard if onboarded === 'yes'
       if (isOnboarded === "yes") {
@@ -507,7 +498,7 @@ const OrganisationContent: React.FC = () => {
       console.log("Login failed, using fallback ID:", fallbackUserId);
 
       setUser(fallbackUserId, "guest", "no");
-      isProcessing = false;
+      setIsProcessing(false);
       router.replace("/onboarding");
     }
   };
@@ -528,10 +519,13 @@ const OrganisationContent: React.FC = () => {
       </div>
     );
   }
-  useState(() => setContent(defaultUI()));
+
+  useEffect(() => {
+    setContent(defaultUI());
+  }, []);
 
   return <>{content}</>;
-}
+};
 
 
 // --------------------------------

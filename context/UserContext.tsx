@@ -45,6 +45,14 @@ export function getDecryptedCookie(name: string) {
   return encryptedValue ? decryptData(encryptedValue) : null;
 }
 
+// Function to Clear All Auth Cookies
+export function clearAuth() {
+  Cookies.remove("userId");
+  Cookies.remove("role");
+  Cookies.remove("onboarded");
+  Cookies.remove("phone");
+}
+
 
 // Define types
 export type UserRole = "guest" | "patient" | "donor" | "veterinary" | "hospital" | "organisation" | "admin" | "removed";
@@ -61,6 +69,7 @@ interface IUserContext {
   isAuthLoading: boolean;
   setUser: (userId: string | null, role: UserRole, onboarded: Onboarded, phone?: string | null) => void;
   setDevice: (device: Device) => void;
+  clearAuth: () => void;
 }
 
 // Create Context with default values
@@ -73,6 +82,7 @@ const UserContext = createContext<IUserContext>({
   isAuthLoading: true,
   setUser: () => { },
   setDevice: () => { },
+  clearAuth: () => { },
 });
 
 // Provider Component
@@ -197,7 +207,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <UserContext.Provider value={{ userId, role, onboarded, device, phone, isAuthLoading, setUser, setDevice: updateDevice }}>
+    <UserContext.Provider value={{ userId, role, onboarded, device, phone, isAuthLoading, setUser, setDevice: updateDevice, clearAuth }}>
       {children}
     </UserContext.Provider>
   );

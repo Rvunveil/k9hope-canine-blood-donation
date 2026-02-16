@@ -57,38 +57,53 @@ const AppPage = () => {
         }
     }, [uiLoaded]);
 
+    // Role-based redirects with proper cleanup
+    useEffect(() => {
+        if (onboarded === "yes" && role === "patient") {
+            const timeout = setTimeout(() => {
+                router.push("/app/p/dashboard");
+            }, 1000);
+            return () => clearTimeout(timeout);
+        }
+    }, [onboarded, role, router]);
+
+    useEffect(() => {
+        if (onboarded === "yes" && role === "donor") {
+            const timeout = setTimeout(() => {
+                router.push("/app/d/dashboard");
+            }, 1000);
+            return () => clearTimeout(timeout);
+        }
+    }, [onboarded, role, router]);
+
+    useEffect(() => {
+        if (onboarded === "yes" && role === "hospital") {
+            const timeout = setTimeout(() => {
+                router.push("/app/h/dashboard");
+            }, 1000);
+            return () => clearTimeout(timeout);
+        }
+    }, [onboarded, role, router]);
+
+    useEffect(() => {
+        if (onboarded === "yes" && role === "organisation") {
+            const timeout = setTimeout(() => {
+                router.push("/app/o/dashboard");
+            }, 1000);
+            return () => clearTimeout(timeout);
+        }
+    }, [onboarded, role, router]);
+
     // Function to select UI based on role
     const renderUI = () => {
         if (onboarded === "yes") {
             switch (role) {
-                case "patient": { }
-                    {
-                        const timeout = setTimeout(() => {
-                            router.push("/app/p/dashboard");
-                        }, 1000);
-                        return; //return <PatDash />;
-                    }
+                case "patient":
                 case "donor":
-                    {
-                        const timeout = setTimeout(() => {
-                            router.push("/app/d/dashboard");
-                        }, 1000);
-                        return; //return <DonDash />;
-                    }
                 case "hospital":
-                    {
-                        const timeout = setTimeout(() => {
-                            router.push("/app/h/dashboard");
-                        }, 1000);
-                        return; //return <HosDash />;
-                    }
                 case "organisation":
-                    {
-                        const timeout = setTimeout(() => {
-                            router.push("/app/o/dashboard");
-                        }, 1000);
-                        return; //return <OrgDash />;
-                    }
+                    // Redirects are handled by useEffect hooks above
+                    return null;
                 default:
                     return (
                         <div className="flex flex-col items-center justify-center h-screen text-left">
@@ -129,6 +144,12 @@ const AppPage = () => {
 
     // Handle logout function
     function handleLogout() {
+        // Import Cookies dynamically
+        const Cookies = require("js-cookie");
+        Cookies.remove("userId");
+        Cookies.remove("role");
+        Cookies.remove("onboarded");
+        Cookies.remove("phone");
         setUser(null, "guest", "guest");
         router.push("/");
     }
