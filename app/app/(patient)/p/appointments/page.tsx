@@ -1,8 +1,8 @@
-// --@ts-nocheck
 "use client";
+
 import { ContentLayout } from "@/components/admin-panel/content-layout";
 import { useState, useEffect } from "react";
-import { CalendarCheck, Clock, MapPin, Stethoscope } from "lucide-react";
+import { CalendarCheck, Clock, MapPin, Stethoscope, Phone } from "lucide-react";
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge"
 // Firebase imports
 import { useUser } from "@/context/UserContext";
 import { db } from "@/firebaseConfig";
-import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, doc, getDoc, orderBy } from "firebase/firestore";
 
 export default function AppointmentsPage() {
   const { userId } = useUser();
@@ -38,16 +38,54 @@ export default function AppointmentsPage() {
           setUserData(userDoc.data());
         }
 
-        // Fetch appointments
-        const appointmentsQuery = query(
-          collection(db, "appointments"),
-          where("userId", "==", userId)
+        // Fetch appointments from admin's donor-appointments
+        const appointmentsRef = collection(db, "donor-appointments");
+        const q = query(
+          appointmentsRef,
+          where("linkedPatientId", "==", userId),
+          orderBy("createdAt", "desc")
         );
-        const querySnapshot = await getDocs(appointmentsQuery);
-        const appointmentData = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
+
+        const snapshot = await getDocs(q);
+        const appointmentData = [];
+
+        for (const docSnap of snapshot.docs) {
+          const data = docSnap.data();
+
+          // Fetch clinic details
+          const clinicRef = doc(db, "hospitals", data.clinicId);
+          const clinicSnap = await getDoc(clinicRef);
+          const clinicData = clinicSnap.exists() ? clinicSnap.data() : {};
+
+          // Fetch donor details if available
+          let donorName = data.donorName;
+          let donorPhone = data.donorPhone;
+
+          if (data.donorId && !donorName) {
+            const donorRef = doc(db, "donors", data.donorId);
+            const donorSnap = await getDoc(donorRef);
+            if (donorSnap.exists()) {
+              donorName = donorSnap.data().d_name;
+              donorPhone = donorSnap.data().phone;
+            }
+          }
+
+          appointmentData.push({
+            id: docSnap.id,
+            clinicName: clinicData.h_name || "Veterinary Clinic",
+            clinicPhone: clinicData.phone,
+            clinicAddress: `${clinicData.h_address_line1}, ${clinicData.h_city}`,
+            donorName: donorName,
+            donorPhone: donorPhone,
+            dogBloodType: data.dogBloodType,
+            appointmentDate: data.appointmentDate,
+            appointmentTime: data.appointmentTime,
+            status: data.status,
+            notes: data.notes,
+            createdAt: data.createdAt,
+          });
+        }
+
         setAppointments(appointmentData);
       } catch (error) {
         console.error("Error fetching data:", error);
@@ -65,16 +103,18 @@ export default function AppointmentsPage() {
   };
 
   // Format appointment date
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateValue: any) => {
     try {
-      return new Date(dateString).toLocaleDateString('en-IN', {
+      if (!dateValue) return "TBD";
+      const date = dateValue.toDate ? dateValue.toDate() : new Date(dateValue);
+      return date.toLocaleDateString('en-IN', {
         weekday: 'short',
         year: 'numeric',
         month: 'short',
         day: 'numeric'
       });
     } catch {
-      return dateString;
+      return String(dateValue);
     }
   };
 
@@ -121,10 +161,11 @@ export default function AppointmentsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Clinic Name</TableHead>
-                  <TableHead>Appointment Type</TableHead>
                   <TableHead>Dog's Name</TableHead>
                   <TableHead>Date & Time</TableHead>
+                  <TableHead>Donor Information</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -136,24 +177,56 @@ export default function AppointmentsPage() {
                         {appointment.clinicName || "Chennai Veterinary Clinic"}
                       </div>
                     </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="bg-blue-50 dark:bg-blue-900">
-                        {appointment.type || "Transfusion"}
-                      </Badge>
-                    </TableCell>
                     <TableCell className="font-medium">
                       {getDogName()}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2 text-sm">
                         <Clock className="h-4 w-4 text-gray-500" />
-                        {formatDate(appointment.date || appointment.scheduledDate)}
+                        {formatDate(appointment.appointmentDate)}
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={appointment.status === "confirmed" ? "default" : "secondary"}>
-                        {appointment.status || "Scheduled"}
+                      <div className="text-sm">
+                        <div className="font-medium">{appointment.donorName || "Donor"}</div>
+                        <div className="text-gray-500 flex items-center gap-1">
+                          <Phone className="h-3 w-3" />
+                          {appointment.donorPhone || "Not provided"}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          Blood Type: {appointment.dogBloodType}
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={
+                        appointment.status === "confirmed" ? "default" :
+                          appointment.status === "completed" ? "secondary" :
+                            appointment.status === "pending" ? "outline" :
+                              "destructive"
+                      }>
+                        {appointment.status === "confirmed" && "✅ Confirmed"}
+                        {appointment.status === "completed" && "🎉 Completed"}
+                        {appointment.status === "pending" && "⏳ Awaiting Confirmation"}
+                        {appointment.status === "cancelled" && "❌ Cancelled"}
                       </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {appointment.status === "confirmed" && (
+                        <Button size="sm" variant="outline">
+                          View Details
+                        </Button>
+                      )}
+                      {appointment.status === "completed" && (
+                        <Button size="sm" variant="ghost" className="text-green-600">
+                          ✓ Received
+                        </Button>
+                      )}
+                      {appointment.status === "pending" && (
+                        <Button size="sm" variant="ghost" className="text-gray-500" disabled>
+                          Waiting...
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -162,16 +235,6 @@ export default function AppointmentsPage() {
           )}
         </CardContent>
       </Card>
-
-      <div className="flex justify-center mt-6 space-x-2">
-        <Button disabled className="bg-accent">
-          Previous
-        </Button>
-        <span className="px-4 py-2">1 / 1</span>
-        <Button disabled className="bg-accent">
-          Next
-        </Button>
-      </div>
     </ContentLayout>
   );
 }

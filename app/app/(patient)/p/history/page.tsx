@@ -1,5 +1,5 @@
-// --@ts-nocheck
 "use client";
+
 import { ContentLayout } from "@/components/admin-panel/content-layout";
 import { useState, useEffect } from "react";
 import { History, AlertTriangle, Calendar, MapPin, FileText, Shield } from "lucide-react";
@@ -12,7 +12,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 // Firebase imports
 import { useUser } from "@/context/UserContext";
 import { db } from "@/firebaseConfig";
-import { collection, query, where, getDocs, doc, getDoc, updateDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, doc, getDoc, updateDoc, orderBy } from "firebase/firestore";
 
 interface Appointment {
   id: string;
@@ -24,6 +24,8 @@ interface Appointment {
   notes?: string;
   medicalNotes?: string;
   status?: string;
+  donorName?: string;
+  quantityReceived?: string;
 }
 
 export default function HistoryPage() {
@@ -33,77 +35,96 @@ export default function HistoryPage() {
   const [profile, setProfile] = useState<any>(null);
   const [userData, setUserData] = useState<any>(null);
   const [hasTransfusion, setHasTransfusion] = useState(false);
+  const [transfusionCount, setTransfusionCount] = useState(0);
 
   // Fetch user profile and completed appointments
   useEffect(() => {
-    async function fetchData() {
+    async function fetchCompletedAppointments() {
       if (!userId) return;
 
       try {
-        // Fetch user profile
+        // Fetch profile
         const profileDoc = await getDoc(doc(db, "patients", userId));
         if (profileDoc.exists()) {
           setProfile(profileDoc.data());
         }
 
-        // Fetch user data for dog's name
+        // Fetch user data
         const userDoc = await getDoc(doc(db, "users", userId));
         if (userDoc.exists()) {
           setUserData(userDoc.data());
         }
 
-        // Fetch completed appointments
-        const appointmentsQuery = query(
-          collection(db, "appointments"),
-          where("userId", "==", userId),
-          where("status", "==", "Completed")
+        // Fetch completed appointments from admin's donor-appointments
+        const appointmentsRef = collection(db, "donor-appointments");
+        const q = query(
+          appointmentsRef,
+          where("linkedPatientId", "==", userId),
+          where("status", "==", "completed"),
+          orderBy("completedAt", "desc") // Assuming admin sets this timestamp
         );
-        const querySnapshot = await getDocs(appointmentsQuery);
-        const appointmentData = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          type: doc.data().type || '',
-          procedureType: doc.data().procedureType || '',
-          clinicName: doc.data().clinicName || '',
-          date: doc.data().date || '',
-          completedDate: doc.data().completedDate || '',
-          notes: doc.data().notes || '',
-          medicalNotes: doc.data().medicalNotes || '',
-          status: doc.data().status || 'Completed',
-          ...doc.data()
-        })) as Appointment[];
-        setAppointments(appointmentData);
 
-        // Check if any transfusion exists in history
-        const hasTransfusionRecord = appointmentData.some(
-          apt => apt.type?.toLowerCase().includes('transfusion') || 
-                 apt.procedureType?.toLowerCase().includes('transfusion')
-        );
-        setHasTransfusion(hasTransfusionRecord);
+        const snapshot = await getDocs(q);
+        const history: Appointment[] = [];
 
-        // Update user record with sensitization status if transfusion found
-        if (hasTransfusionRecord) {
+        for (const docSnap of snapshot.docs) {
+          const data = docSnap.data();
+
+          // Fetch clinic details
+          const clinicRef = doc(db, "hospitals", data.clinicId);
+          const clinicSnap = await getDoc(clinicRef);
+          const clinicData = clinicSnap.exists() ? clinicSnap.data() : {};
+
+          history.push({
+            id: docSnap.id,
+            type: "Blood Transfusion",
+            procedureType: `${data.dogBloodType} Transfusion`,
+            clinicName: clinicData.h_name || "Veterinary Clinic",
+            date: data.completedAt ? data.completedAt.toDate().toISOString() : data.appointmentDate,
+            completedDate: data.completedAt ? data.completedAt.toDate().toISOString() : "",
+            notes: data.notes,
+            medicalNotes: `Received ${data.quantityDonated || "450ml"} of ${data.dogBloodType} blood`,
+            donorName: data.donorName,
+            quantityReceived: data.quantityDonated || "450ml",
+            status: "Completed",
+          });
+        }
+
+        setAppointments(history);
+        setTransfusionCount(history.length);
+
+        // Check sensitization
+        if (history.length > 0) {
+          setHasTransfusion(true);
           await updateSensitizationStatus();
         }
 
       } catch (error) {
-        console.error("Error fetching data:", error);
+        console.error("Error:", error);
       } finally {
         setLoading(false);
       }
     }
 
-    fetchData();
+    fetchCompletedAppointments();
   }, [userId]);
 
   // Update user record to indicate sensitization
   const updateSensitizationStatus = async () => {
     try {
       const userDocRef = doc(db, "users", userId);
+      // We also update patients collection if separate
+      const patientDocRef = doc(db, "patients", userId);
+
       await updateDoc(userDocRef, {
         isSensitized: true,
         sensitizationDate: new Date().toISOString(),
-        lastUpdated: new Date().toISOString()
-      });
+      }).catch(() => { }); // access might be denied if rules strict
+
+      await updateDoc(patientDocRef, {
+        isSensitized: true,
+      }).catch(() => { });
+
       console.log("Updated sensitization status for user");
     } catch (error) {
       console.error("Error updating sensitization status:", error);
@@ -118,6 +139,7 @@ export default function HistoryPage() {
   // Format appointment date
   const formatDate = (dateString: string) => {
     try {
+      if (!dateString) return "N/A";
       return new Date(dateString).toLocaleDateString('en-IN', {
         weekday: 'short',
         year: 'numeric',
@@ -147,8 +169,8 @@ export default function HistoryPage() {
       <Alert className="mb-6 border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950">
         <AlertTriangle className="h-4 w-4 text-amber-600" />
         <AlertDescription className="text-amber-800 dark:text-amber-200">
-          <strong>⚠️ Safety Protocol:</strong> While a first canine transfusion may be tolerated without full crossmatching, 
-          immune sensitization occurs immediately after. For all repeat transfusions, blood typing and crossmatching are 
+          <strong>⚠️ Safety Protocol:</strong> While a first canine transfusion may be tolerated without full crossmatching,
+          immune sensitization occurs immediately after. For all repeat transfusions, blood typing and crossmatching are
           mandatory to prevent life-threatening reactions.
         </AlertDescription>
       </Alert>
@@ -158,7 +180,7 @@ export default function HistoryPage() {
         <Alert className="mb-6 border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950">
           <Shield className="h-4 w-4 text-red-600" />
           <AlertDescription className="text-red-800 dark:text-red-200">
-            <strong>🚨 Medical Alert:</strong> {getDogName()} has been sensitized due to previous transfusion(s). 
+            <strong>🚨 Medical Alert:</strong> {getDogName()} has received {transfusionCount} {transfusionCount === 1 ? " transfusion" : " transfusions"}.
             All future transfusions require mandatory crossmatching.
           </AlertDescription>
         </Alert>
@@ -190,6 +212,7 @@ export default function HistoryPage() {
                   <TableHead>Clinic Name</TableHead>
                   <TableHead>Procedure Type</TableHead>
                   <TableHead>Medical Notes</TableHead>
+                  <TableHead>Donor Details</TableHead>
                   <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
@@ -199,7 +222,7 @@ export default function HistoryPage() {
                     <TableCell>
                       <div className="flex items-center gap-2 text-sm">
                         <Calendar className="h-4 w-4 text-gray-500" />
-                        {formatDate(appointment.date || appointment.completedDate)}
+                        {formatDate(appointment.date || appointment.completedDate || "")}
                       </div>
                     </TableCell>
                     <TableCell className="font-medium">
@@ -209,10 +232,10 @@ export default function HistoryPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge 
+                      <Badge
                         variant={appointment.type?.toLowerCase().includes('transfusion') ? "destructive" : "outline"}
-                        className={appointment.type?.toLowerCase().includes('transfusion') 
-                          ? "bg-red-100 dark:bg-red-900" 
+                        className={appointment.type?.toLowerCase().includes('transfusion')
+                          ? "bg-red-100 dark:bg-red-900"
                           : "bg-blue-50 dark:bg-blue-900"}
                       >
                         {appointment.type || appointment.procedureType || "Check-up"}
@@ -222,6 +245,20 @@ export default function HistoryPage() {
                       <div className="truncate">
                         {appointment.notes || appointment.medicalNotes || "Standard procedure completed"}
                       </div>
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {appointment.donorName ? (
+                        <div>
+                          <div className="font-medium text-green-700">
+                            ❤️ {appointment.donorName}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            Donated {appointment.quantityReceived}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-gray-400">Anonymous</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge variant="default" className="bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200">

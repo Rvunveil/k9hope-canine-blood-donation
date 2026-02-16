@@ -1,296 +1,442 @@
 "use client";
-import React, { useEffect, useState } from "react";
+
+import { useState, useEffect } from "react";
 import { useUser } from "@/context/UserContext";
 import { useRouter } from "next/navigation";
 import { db } from "@/firebaseConfig";
-import { collection, query, where, orderBy, getDocs, updateDoc, doc } from "firebase/firestore";
-import { ArrowLeft, Bell, Check, AlertCircle, Calendar, Heart, Info, Trash2, CheckCheck } from "lucide-react";
-import HeartLoading from "@/components/custom/HeartLoading";
-import Link from "next/link";
+import { collection, query, where, getDocs, doc, updateDoc, Timestamp, writeBatch, getDoc, increment } from "firebase/firestore";
 import { ContentLayout } from "@/components/admin-panel/content-layout";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Bell, Check, X, Calendar as CalendarIcon, Clock, Droplet } from "lucide-react";
+import { format } from "date-fns";
+import HeartLoading from "@/components/custom/HeartLoading";
 
-export default function NotificationsPage() {
+export default function DonorNotificationsPage() {
   const { userId, role } = useUser();
   const router = useRouter();
 
   const [notifications, setNotifications] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [filterType, setFilterType] = useState("all");
+  const [loading, setLoading] = useState(true);
+  const [selectedNotification, setSelectedNotification] = useState<any>(null);
+  const [acceptDialogOpen, setAcceptDialogOpen] = useState(false);
+  const [appointmentDate, setAppointmentDate] = useState<Date>();
+  const [appointmentTime, setAppointmentTime] = useState("");
 
   useEffect(() => {
-    if (!userId || role !== "donor") {
-      router.push("/");
+    if (userId && role === "donor") {
+      fetchNotifications();
+    }
+  }, [userId, role]);
+
+  async function fetchNotifications() {
+    if (!userId) return;
+
+    setLoading(true);
+    try {
+      const notificationsRef = collection(db, "notifications");
+      const q = query(
+        notificationsRef,
+        where("userId", "==", userId),
+        where("userRole", "==", "donor")
+      );
+
+      const snapshot = await getDocs(q);
+      const notifs = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate(),
+      }));
+
+      // Sort by date, unread first
+      notifs.sort((a, b) => {
+        if (a.read !== b.read) return a.read ? 1 : -1;
+        return b.createdAt - a.createdAt;
+      });
+
+      setNotifications(notifs);
+    } catch (error) {
+      console.error("Error:", error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleAcceptMatch() {
+    if (!selectedNotification || !appointmentDate) {
+      alert("Please select an appointment date");
       return;
     }
 
-    async function fetchNotifications() {
-      setIsLoading(true);
+    try {
+      const batch = writeBatch(db);
+      const appointmentId = selectedNotification.data.appointmentId;
 
-      try {
-        const notificationsRef = collection(db, "notifications");
-        const q = query(
-          notificationsRef,
-          where("userId", "==", userId),
-          orderBy("createdAt", "desc")
-        );
+      // Check if appointment still available (first come first serve)
+      const appointmentRef = doc(db, "donor-appointments", appointmentId);
+      const appointmentSnap = await getDoc(appointmentRef);
 
-        const snapshot = await getDocs(q);
-        // Filter out deleted notifications on client side
-        const notificationsData = snapshot.docs
-          .map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          }))
-          .filter((n: any) => !n.deleted);
-
-        setNotifications(notificationsData);
-      } catch (error) {
-        console.error("Error fetching notifications:", error);
-        setNotifications([]);
+      if (!appointmentSnap.exists()) {
+        alert("❌ This match is no longer available");
+        return;
       }
 
-      setIsLoading(false);
+      const appointmentData = appointmentSnap.data();
+
+      if (appointmentData.status !== "pending_donor_acceptance") {
+        alert("❌ This request has already been accepted or closed");
+        fetchNotifications();
+        setAcceptDialogOpen(false);
+        return;
+      }
+
+      // Update appointment status
+      batch.update(appointmentRef, {
+        status: "confirmed",
+        appointmentDate: format(appointmentDate, "yyyy-MM-dd"),
+        appointmentTime: appointmentTime || "TBD",
+        acceptedAt: Timestamp.now(),
+        acceptedBy: userId,
+      });
+
+      // Mark notification as read
+      const notificationRef = doc(db, "notifications", selectedNotification.id);
+      batch.update(notificationRef, {
+        read: true,
+        respondedAt: Timestamp.now(),
+      });
+
+      // Create notification for PATIENT
+      const patientNotificationRef = doc(collection(db, "notifications"));
+      batch.set(patientNotificationRef, {
+        userId: appointmentData.linkedPatientId,
+        userRole: "patient",
+        type: "appointment_confirmed",
+        title: "🎉 Appointment Confirmed!",
+        message: `Your blood transfusion appointment has been scheduled for ${format(appointmentDate, "PPP")} at ${appointmentTime || "TBD"}`,
+        data: {
+          appointmentId,
+          appointmentDate: format(appointmentDate, "yyyy-MM-dd"),
+          appointmentTime: appointmentTime || "TBD",
+        },
+        read: false,
+        createdAt: Timestamp.now(),
+      });
+
+      // Create notification for ADMIN (Clinic)
+      const adminNotificationRef = doc(collection(db, "notifications"));
+      batch.set(adminNotificationRef, {
+        userId: appointmentData.clinicId,
+        userRole: "admin", // Assuming admin checks universal notifications or based on clinicId
+        // In reality, admin might need to poll or have a dedicated notification view. 
+        // For now we store it.
+        type: "appointment_confirmed",
+        title: "✅ Donor Accepted Match",
+        message: `Donor accepted blood request. Appointment: ${format(appointmentDate, "PPP")}`,
+        data: {
+          appointmentId,
+          donorId: userId,
+          patientId: appointmentData.linkedPatientId,
+        },
+        read: false,
+        createdAt: Timestamp.now(),
+      });
+
+      // Update request pending/confirmed counts
+      // Note: Admin logic uses 'veterinary-donor-requests' or 'patients'??
+      // In the Admin Matchmaking code, we updated 'patients' collection pendingMatches. 
+      // But we also linked to 'veterinary-donor-requests' implicitly via requestId?
+      // Wait, in Admin code: `requestId: requestData.id` (Patient ID used as request ID).
+      // So we should update 'patients' collection.
+
+      const patientRef = doc(db, "patients", appointmentData.linkedPatientId); // requestData.id was linkedPatientId
+      batch.update(patientRef, {
+        pendingMatches: increment(-1),
+        confirmedMatches: increment(1),
+        request_status: "accepted", // reinforce status
+      });
+
+      await batch.commit();
+
+      alert("✅ Appointment confirmed! Patient has been notified.");
+      setAcceptDialogOpen(false);
+      fetchNotifications();
+
+    } catch (error) {
+      console.error("Error:", error);
+      alert("❌ Failed to confirm appointment");
     }
+  }
 
-    fetchNotifications();
-  }, [userId, role, router]);
+  async function handleRejectMatch(notification: any) {
+    if (!confirm("Are you sure you want to reject this match?")) return;
 
-  const markAsRead = async (notificationId: string) => {
+    try {
+      const batch = writeBatch(db);
+      const appointmentId = notification.data.appointmentId;
+
+      // Update appointment
+      const appointmentRef = doc(db, "donor-appointments", appointmentId);
+      batch.update(appointmentRef, {
+        status: "rejected_by_donor",
+        rejectedAt: Timestamp.now(),
+        rejectedBy: userId,
+      });
+
+      // Mark notification as read
+      const notificationRef = doc(db, "notifications", notification.id);
+      batch.update(notificationRef, {
+        read: true,
+        respondedAt: Timestamp.now(),
+      });
+
+      // Get appointment data for patient notification
+      const appointmentSnap = await getDoc(appointmentRef);
+      const appointmentData = appointmentSnap.data();
+
+      // Notify patient
+      const patientNotificationRef = doc(collection(db, "notifications"));
+      batch.set(patientNotificationRef, {
+        userId: appointmentData.linkedPatientId,
+        userRole: "patient",
+        type: "donor_declined",
+        title: "🔄 Match Update",
+        message: "A donor was unable to proceed. Admin is finding another match for you.",
+        data: { appointmentId },
+        read: false,
+        createdAt: Timestamp.now(),
+      });
+
+      // Update request pending count
+      const patientRef = doc(db, "patients", appointmentData.linkedPatientId);
+      batch.update(patientRef, {
+        pendingMatches: increment(-1),
+      });
+
+      await batch.commit();
+
+      alert("Match declined. Admin will find another donor.");
+      fetchNotifications();
+
+    } catch (error) {
+      console.error("Error:", error);
+      alert("❌ Failed to decline match");
+    }
+  }
+
+  async function markAsRead(notificationId: string) {
     try {
       await updateDoc(doc(db, "notifications", notificationId), {
-        read: true
+        read: true,
       });
-      setNotifications(prev =>
-        prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
-      );
+      fetchNotifications();
     } catch (error) {
-      console.error("Error marking notification as read:", error);
+      console.error("Error:", error);
     }
-  };
+  }
 
-  const markAllAsRead = async () => {
-    const unread = notifications.filter(n => !n.read);
-    for (const notification of unread) {
-      await markAsRead(notification.id);
-    }
-  };
-
-  const deleteNotification = async (notificationId: string) => {
-    try {
-      await updateDoc(doc(db, "notifications", notificationId), {
-        deleted: true
-      });
-      setNotifications(prev => prev.filter(n => n.id !== notificationId));
-    } catch (error) {
-      console.error("Error deleting notification:", error);
-    }
-  };
-
-  if (isLoading) {
+  if (loading) {
     return (
-      <div className="fixed inset-0 flex items-center justify-center bg-background z-50">
+      <div className="fixed inset-0 flex items-center justify-center bg-background">
         <HeartLoading />
       </div>
     );
   }
 
-  // Filter notifications
-  const filteredNotifications = notifications.filter(n => {
-    if (filterType === "all") return true;
-    return n.type === filterType;
-  });
-
   const unreadCount = notifications.filter(n => !n.read).length;
 
   return (
     <ContentLayout title="Notifications">
-      <div className="min-h-screen bg-gray-50 flex flex-col">
-        {/* Hero Section */}
-        <section className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl mb-6 shadow-md">
-          <div className="max-w-7xl mx-auto px-6 py-8">
-            <div className="flex items-center gap-6">
-              <div className="bg-white/20 p-4 rounded-xl relative shadow-sm">
-                <Bell className="w-8 h-8 text-white" />
-                {unreadCount > 0 && (
-                  <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold w-6 h-6 rounded-full flex items-center justify-center shadow-sm border-2 border-indigo-600">
-                    {unreadCount}
-                  </span>
-                )}
+      <div className="space-y-6">
+        {/* Header */}
+        <Card className="bg-gradient-to-r from-purple-500 to-purple-600 text-white border-none">
+          <CardContent className="p-8">
+            <div className="flex items-center gap-4">
+              <div className="bg-white/20 p-3 rounded-lg">
+                <Bell className="w-8 h-8" />
               </div>
               <div>
-                <h2 className="text-2xl font-bold mb-1">Notification Center</h2>
-                <div className="flex items-center gap-3">
-                  <p className="text-blue-100 font-medium">
-                    {unreadCount > 0
-                      ? `You have ${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}`
-                      : "You're all caught up!"}
-                  </p>
-                  {unreadCount > 0 && (
-                    <button
-                      onClick={markAllAsRead}
-                      className="text-white text-xs bg-white/20 hover:bg-white/30 px-3 py-1 rounded-full flex items-center gap-1 transition-colors"
-                    >
-                      <CheckCheck className="w-3 h-3" /> Mark all read
-                    </button>
-                  )}
-                </div>
+                <h2 className="text-3xl font-bold mb-2">Notifications</h2>
+                <p className="text-purple-50">
+                  {unreadCount > 0
+                    ? `You have ${unreadCount} unread notification${unreadCount > 1 ? 's' : ''}`
+                    : "You're all caught up!"
+                  }
+                </p>
               </div>
             </div>
-          </div>
-        </section>
-
-        {/* Filter Tabs */}
-        <section className="bg-white border-b rounded-xl mb-6 shadow-sm overflow-hidden">
-          <div className="max-w-7xl mx-auto px-6">
-            <div className="flex gap-2 py-4 overflow-x-auto scrollbar-hide">
-              {[
-                { key: "all", label: "All", icon: Bell },
-                { key: "match", label: "Matches", icon: Heart },
-                { key: "appointment", label: "Appointments", icon: Calendar },
-                { key: "system", label: "System", icon: Info },
-              ].map(({ key, label, icon: Icon }) => {
-                const count = notifications.filter(n => key === "all" || n.type === key).length;
-                return (
-                  <button
-                    key={key}
-                    onClick={() => setFilterType(key)}
-                    className={`px-6 py-2 rounded-lg font-semibold transition-all flex items-center gap-2 whitespace-nowrap active:scale-95 ${filterType === key
-                        ? "bg-blue-500 text-white shadow-md"
-                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                      }`}
-                  >
-                    <Icon className="w-4 h-4" />
-                    {label}
-                    {count > 0 && <span className={`text-xs ml-1 px-1.5 py-0.5 rounded-full ${filterType === key ? 'bg-white/20' : 'bg-gray-200'}`}>{count}</span>}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </section>
+          </CardContent>
+        </Card>
 
         {/* Notifications List */}
-        <main className="max-w-7xl mx-auto w-full pb-8 flex-1">
-          {filteredNotifications.length > 0 ? (
-            <div className="space-y-4">
-              {filteredNotifications.map((notification) => (
-                <NotificationCard
-                  key={notification.id}
-                  notification={notification}
-                  onMarkRead={markAsRead}
-                  onDelete={deleteNotification}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="bg-white rounded-xl p-16 text-center shadow-sm border border-gray-100 h-64 flex flex-col justify-center items-center">
-              <div className="text-yellow-400 mb-6 relative">
-                <Bell className="w-16 h-16 mx-auto opacity-20 text-gray-400" />
-                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-green-500 bg-white rounded-full p-2 border-4 border-white shadow-sm">
-                  <Check className="w-8 h-8" strokeWidth={3} />
-                </div>
-              </div>
-              <h3 className="text-xl font-bold text-gray-700 mb-2">
-                All Clear!
+        {notifications.length === 0 ? (
+          <Card>
+            <CardContent className="py-16 text-center">
+              <Bell className="h-16 w-16 mx-auto text-gray-400 mb-4" />
+              <h3 className="text-xl font-semibold text-gray-700 mb-2">
+                No notifications yet
               </h3>
               <p className="text-gray-500">
-                You have no {filterType !== "all" ? `${filterType} ` : ''}notifications at the moment.
+                You'll be notified when matches are found
               </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-4">
+            {notifications.map((notification) => (
+              <NotificationCard
+                key={notification.id}
+                notification={notification}
+                onAccept={() => {
+                  setSelectedNotification(notification);
+                  setAcceptDialogOpen(true);
+                }}
+                onReject={() => handleRejectMatch(notification)}
+                onMarkRead={() => markAsRead(notification.id)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Accept Match Dialog */}
+      <Dialog open={acceptDialogOpen} onOpenChange={setAcceptDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Appointment Details</DialogTitle>
+          </DialogHeader>
+
+          {selectedNotification && (
+            <div className="space-y-4">
+              <Card className="bg-blue-50 dark:bg-blue-950/20">
+                <CardContent className="p-4">
+                  <h4 className="font-semibold mb-2">Match Details:</h4>
+                  <div className="space-y-1 text-sm">
+                    <p>Patient: <strong>{selectedNotification.data.patientName}</strong></p>
+                    <p>Blood Type: <strong className="text-red-600">{selectedNotification.data.bloodType}</strong></p>
+                    {selectedNotification.data.isUrgent === "yes" && (
+                      <Badge className="bg-red-600">🚨 URGENT</Badge>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div>
+                <Label>Select Appointment Date *</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-start">
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {appointmentDate ? format(appointmentDate, "PPP") : "Choose date"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent>
+                    <Calendar
+                      mode="single"
+                      selected={appointmentDate}
+                      onSelect={setAppointmentDate}
+                      disabled={(date) => date < new Date()}
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              <div>
+                <Label>Preferred Time</Label>
+                <Input
+                  type="time"
+                  value={appointmentTime}
+                  onChange={(e) => setAppointmentTime(e.target.value)}
+                />
+                <p className="text-xs text-gray-500 mt-1">Clinic will confirm exact time</p>
+              </div>
             </div>
           )}
-        </main>
-      </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAcceptDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleAcceptMatch} className="bg-green-600 hover:bg-green-700">
+              <Check className="h-4 w-4 mr-2" />
+              Accept & Schedule
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </ContentLayout>
   );
 }
 
-function NotificationCard({ notification, onMarkRead, onDelete }: any) {
-  const createdAt = notification.createdAt?.toDate
-    ? notification.createdAt.toDate()
-    : new Date(notification.createdAt);
-
-  const getRelativeTime = (date: Date) => {
-    const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
-    const intervals = {
-      year: 31536000,
-      month: 2592000,
-      week: 604800,
-      day: 86400,
-      hour: 3600,
-      minute: 60
-    };
-
-    for (const [name, secondsInInterval] of Object.entries(intervals)) {
-      const interval = Math.floor(seconds / secondsInInterval);
-      if (interval >= 1) {
-        return `${interval} ${name}${interval > 1 ? 's' : ''} ago`;
-      }
-    }
-    return 'Just now';
-  };
-
-  const typeConfig: Record<string, any> = {
-    match: { icon: Heart, color: "bg-red-50 border-red-100", iconColor: "text-red-500", iconBg: "bg-red-100" },
-    appointment: { icon: Calendar, color: "bg-blue-50 border-blue-100", iconColor: "text-blue-500", iconBg: "bg-blue-100" },
-    system: { icon: Info, color: "bg-gray-50 border-gray-100", iconColor: "text-gray-500", iconBg: "bg-gray-100" },
-  };
-
-  const config = typeConfig[notification.type] || typeConfig.system;
-  const Icon = config.icon;
+function NotificationCard({ notification, onAccept, onReject, onMarkRead }: any) {
+  const isPending = notification.type === "match_found" && !notification.read;
 
   return (
-    <div className={`bg-white border rounded-xl p-6 ${!notification.read ? 'border-l-4 border-l-blue-500 shadow-md bg-blue-50/10' : 'border-gray-100 shadow-sm'} transition-all hover:shadow-lg group relative overflow-hidden`}>
-      {/* Unread Indicator Dot */}
-      {!notification.read && (
-        <div className="absolute top-4 right-4 w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
-      )}
+    <Card className={`${!notification.read ? "border-purple-500 border-2" : ""} transition-all hover:shadow-md`}>
+      <CardContent className="p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-2">
+              <h3 className="font-bold text-lg">{notification.title}</h3>
+              {!notification.read && (
+                <Badge className="bg-purple-600">New</Badge>
+              )}
+              {notification.data?.isUrgent === "yes" && (
+                <Badge className="bg-red-600">URGENT</Badge>
+              )}
+            </div>
 
-      <div className="flex items-start gap-5">
-        <div className={`${config.iconBg} ${config.iconColor} p-3 rounded-xl shrink-0`}>
-          <Icon className="w-6 h-6" />
-        </div>
+            <p className="text-gray-700 mb-3">{notification.message}</p>
 
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-2">
-            <h3 className={`font-bold text-lg ${!notification.read ? 'text-gray-900' : 'text-gray-700'}`}>
-              {notification.title}
-            </h3>
-            <span className="text-xs font-medium text-gray-400 whitespace-nowrap sm:ml-2">
-              {getRelativeTime(createdAt)}
-            </span>
+            <div className="flex items-center gap-2 text-sm text-gray-500">
+              <Clock className="h-4 w-4" />
+              <span>{format(notification.createdAt, "PPp")}</span>
+            </div>
+
+            {notification.data && (
+              <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-900 rounded-lg text-sm">
+                {notification.data.patientName && (
+                  <p>Patient: <strong>{notification.data.patientName}</strong></p>
+                )}
+                {notification.data.bloodType && (
+                  <div className="flex items-center gap-2 mt-1">
+                    <Droplet className="h-4 w-4 text-red-500" />
+                    <span>Blood Type: <strong className="text-red-600">{notification.data.bloodType}</strong></span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          <p className="text-gray-600 mb-4 leading-relaxed">
-            {notification.message}
-          </p>
-
-          <div className="flex flex-wrap items-center gap-3 pt-2">
-            {notification.actionUrl && (
-              <Link href={notification.actionUrl}>
-                <button className="bg-blue-500 hover:bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-semibold shadow-sm transition-all active:scale-95">
-                  {notification.actionLabel || "View Details"}
-                </button>
-              </Link>
+          {/* Actions */}
+          <div className="flex flex-col gap-2">
+            {isPending ? (
+              <>
+                <Button onClick={onAccept} size="sm" className="bg-green-600 hover:bg-green-700">
+                  <Check className="h-4 w-4 mr-2" />
+                  Accept
+                </Button>
+                <Button onClick={onReject} size="sm" variant="outline">
+                  <X className="h-4 w-4 mr-2" />
+                  Decline
+                </Button>
+              </>
+            ) : !notification.read ? (
+              <Button onClick={onMarkRead} size="sm" variant="outline">
+                Mark Read
+              </Button>
+            ) : (
+              <Badge variant="secondary">Read</Badge>
             )}
-            {!notification.read && (
-              <button
-                onClick={() => onMarkRead(notification.id)}
-                className="border border-gray-200 hover:bg-gray-50 hover:border-gray-300 text-gray-600 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors"
-              >
-                <Check className="w-4 h-4" />
-                Mark as Read
-              </button>
-            )}
-            <button
-              onClick={() => onDelete(notification.id)}
-              className="ml-auto text-gray-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-lg transition-colors"
-              aria-label="Delete notification"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
           </div>
         </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }

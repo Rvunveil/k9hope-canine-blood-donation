@@ -1,4 +1,3 @@
-//@ts-nocheck
 "use client";
 
 import React from "react";
@@ -24,8 +23,7 @@ import GreetingCard from "@/components/portals/common-parts/greeting-card"
 // User Imports
 import { useUser } from "@/context/UserContext";
 import { db } from "@/firebaseConfig";
-import { doc, getDoc, collection, getDocs } from "firebase/firestore";
-import { getUserDataById } from "@/firebaseFunctions";
+import { doc, getDoc, collection, getDocs, query, where, orderBy } from "firebase/firestore";
 
 export default function DashboardPage() {
   const sidebar = useStore(useSidebar, (x) => x);
@@ -33,17 +31,137 @@ export default function DashboardPage() {
   const [profile, setProfile] = useState<any>(null);
   const [userData, setUserData] = useState<any>(null);
   const [clinics, setClinics] = useState<any[]>([]);
+  const [matchedDonors, setMatchedDonors] = useState(0);
 
   useEffect(() => {
     async function fetchPatientData() {
       if (!userId) return;
-      const data = await getUserDataById(userId, "patient");
-      setProfile(data);
+
+      try {
+        // Fetch patient profile from admin's patient-management (which is patients collection)
+        const patientRef = doc(db, "patients", userId);
+        const patientSnap = await getDoc(patientRef);
+
+        if (patientSnap.exists()) {
+          const data = patientSnap.data();
+          setProfile(data);
+
+          // Fetch linked blood request from admin
+          await fetchBloodRequestStatus(data);
+        }
+      } catch (error) {
+        console.error("Error:", error);
+      }
     }
+
     fetchPatientData();
   }, [userId]);
 
-  // Fetch user data from /users collection for dog's name
+  // Fetch linked blood request
+  async function fetchBloodRequestStatus(patientData: any) {
+    try {
+      // Check if admin created a request for this patient
+      const requestsRef = collection(db, "veterinary-donor-requests");
+      const q = query(
+        requestsRef,
+        where("linkedPatientId", "==", userId),
+        where("status", "==", "open"),
+        orderBy("createdAt", "desc")
+      );
+
+      const snapshot = await getDocs(q);
+
+      if (!snapshot.empty) {
+        const requestData = snapshot.docs[0].data();
+
+        // Update UI with admin's blood request details
+        setProfile((prev: any) => ({
+          ...prev,
+          hasActiveRequest: true,
+          requestId: snapshot.docs[0].id,
+          adminRequestedBloodType: requestData.bloodTypeNeeded,
+          adminRequestedQuantity: requestData.quantityNeeded,
+          requestUrgency: requestData.isUrgent,
+        }));
+      }
+    } catch (error) {
+      console.error("Error fetching request:", error);
+    }
+  }
+
+  // Fetch hospital inventory
+  useEffect(() => {
+    async function fetchHospitalInventory() {
+      try {
+        // Fetch hospitals in patient's city with blood inventory
+        // If city is not available, default to "Chennai" or fetch all
+        const city = profile?.p_city || "Chennai";
+        const hospitalsRef = collection(db, "hospitals");
+        const q = query(
+          hospitalsRef,
+          where("h_city", "==", city)
+        );
+
+        const snapshot = await getDocs(q);
+        const hospitalsData = [];
+
+        for (const docSnap of snapshot.docs) {
+          const data = docSnap.data();
+
+          // Fetch blood inventory for this hospital
+          const inventoryRef = doc(db, "blood-inventory", docSnap.id);
+          const inventorySnap = await getDoc(inventoryRef);
+          const inventoryData = inventorySnap.exists() ? inventorySnap.data() : {};
+
+          // Get stock for patient's blood type
+          const bloodTypeKey = profile?.p_bloodgroup || "DEA 4";
+          const stock = inventoryData[bloodTypeKey] || 0;
+
+          hospitalsData.push({
+            id: docSnap.id,
+            h_name: data.h_name,
+            phone: data.phone,
+            h_city: data.h_city,
+            stock: stock,
+            bloodType: bloodTypeKey,
+          });
+        }
+
+        setClinics(hospitalsData);
+      } catch (error) {
+        console.error("Error fetching inventory:", error);
+      }
+    }
+
+    if (profile?.p_city || profile === null) { // Try even if profile null initially (will rely on default)
+      // Actually better to wait for profile if we want city matching, but default Chennai is ok
+      fetchHospitalInventory();
+    }
+  }, [profile?.p_city, profile?.p_bloodgroup]);
+
+  // Fetch matched donors
+  useEffect(() => {
+    async function fetchMatchedDonors() {
+      if (!userId) return;
+      try {
+        const appointmentsRef = collection(db, "donor-appointments");
+        const q = query(
+          appointmentsRef,
+          where("linkedPatientId", "==", userId),
+          where("status", "in", ["pending", "confirmed"])
+        );
+
+        const snapshot = await getDocs(q);
+        setMatchedDonors(snapshot.size);
+      } catch (error) {
+        console.error("Error fetching matched donors:", error);
+      }
+    }
+
+    fetchMatchedDonors();
+  }, [userId]);
+
+  // Fetch user data from /users collection for dog's name (existing logic)
   useEffect(() => {
     async function fetchUserData() {
       if (!userId) return;
@@ -59,24 +177,7 @@ export default function DashboardPage() {
     fetchUserData();
   }, [userId]);
 
-  // Fetch Chennai veterinary clinics
-  useEffect(() => {
-    async function fetchClinics() {
-      try {
-        const clinicsSnapshot = await getDocs(collection(db, "clinics"));
-        const clinicsData = clinicsSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setClinics(clinicsData);
-      } catch (error) {
-        console.error("Error fetching clinics:", error);
-      }
-    }
-    fetchClinics();
-  }, []);
-
-  // ✅ Sidebar check inside JSX instead of returning early
+  // Sidebar check
   if (!sidebar) {
     return <div>Loading Sidebar...</div>;
   }
@@ -88,7 +189,6 @@ export default function DashboardPage() {
     return "Good Evening";
   };
 
-  // Get owner name from email or user data
   const getOwnerName = () => {
     if (userData?.email) {
       return userData.email.split('@')[0] === 'adithyatamilselvan' ? 'Adithya' : userData.email.split('@')[0];
@@ -99,7 +199,6 @@ export default function DashboardPage() {
     return "Adithya";
   };
 
-  // Get dog's name from user data first, then profile
   const getDogName = () => {
     return userData?.p_name || profile?.p_name || "your dog";
   };
@@ -107,9 +206,9 @@ export default function DashboardPage() {
   return (
     <ContentLayout title="Clinical Dashboard">
       <div>
-        <GreetingCard 
-          name={getDogName()} 
-          role="patient" 
+        <GreetingCard
+          name={getDogName()}
+          role="patient"
           customGreeting={`🌤️ ${getTimeOfDay()}, ${getOwnerName()}. Monitoring Jillu's recovery.`}
         />
       </div>
@@ -124,18 +223,29 @@ export default function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="text-center p-4 bg-white dark:bg-gray-800 rounded-lg border border-red-200">
                 <div className="text-2xl font-bold text-red-600">{profile?.p_bloodgroup || "DEA 1.1+"}</div>
                 <div className="text-sm text-gray-600 dark:text-gray-400">Required Blood Type</div>
               </div>
               <div className="text-center p-4 bg-white dark:bg-gray-800 rounded-lg border border-red-200">
-                <div className="text-2xl font-bold text-red-600">{profile?.p_urgencyRequirment === "high" ? "CRITICAL" : "STABLE"}</div>
+                <div className="text-2xl font-bold text-red-600">
+                  {profile?.hasActiveRequest
+                    ? (profile.requestUrgency === "yes" ? "🚨 URGENT" : "ACTIVE")
+                    : profile?.p_urgencyRequirment === "high" ? "CRITICAL" : "STABLE"
+                  }
+                </div>
                 <div className="text-sm text-gray-600 dark:text-gray-400">Current Status</div>
               </div>
               <div className="text-center p-4 bg-white dark:bg-gray-800 rounded-lg border border-red-200">
-                <div className="text-2xl font-bold text-red-600">{profile?.p_quantityRequirment || "1"}</div>
+                <div className="text-2xl font-bold text-red-600">
+                  {profile?.adminRequestedQuantity || profile?.p_quantityRequirment || "1"}
+                </div>
                 <div className="text-sm text-gray-600 dark:text-gray-400">Units Needed</div>
+              </div>
+              <div className="text-center p-4 bg-white rounded-lg border border-green-200">
+                <div className="text-2xl font-bold text-green-600">{matchedDonors}</div>
+                <div className="text-sm text-gray-600">Donors Matched</div>
               </div>
             </div>
           </CardContent>
@@ -231,7 +341,7 @@ export default function DashboardPage() {
           <CardHeader>
             <CardTitle className="text-xl font-bold text-emerald-800 dark:text-emerald-200 flex items-center gap-2">
               <MapPin className="h-5 w-5" />
-              Chennai Veterinary Network Availability
+              {profile?.p_city || "Chennai"} Veterinary Network Availability
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-6">
@@ -242,39 +352,17 @@ export default function DashboardPage() {
                     <div className="font-bold text-emerald-700 dark:text-emerald-300">{clinic.h_name || "Veterinary Clinic"}</div>
                     <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">{clinic.h_phone || "Contact Available"}</div>
                     <Badge variant={clinic.stock > 2 ? "default" : clinic.stock > 0 ? "secondary" : "destructive"}>
-                      {clinic.stock > 2 ? "Available" : clinic.stock > 0 ? "Limited Stock" : "Out of Stock"}
+                      {clinic.stock > 2 ? "✅ Available" : clinic.stock > 0 ? "⚠️ Limited" : "❌ Out of Stock"}
                     </Badge>
-                    <div className="text-xs text-gray-500 mt-2">{clinic.stock || "0"} Units Available</div>
+                    <div className="text-xs text-gray-500 mt-2">
+                      {clinic.stock} Units ({clinic.bloodType})
+                    </div>
                   </div>
                 </div>
               )) : (
-                // Fallback to hardcoded Chennai clinics if no data
-                <>
-                  <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-emerald-200 shadow-sm">
-                    <div className="text-center">
-                      <div className="font-bold text-emerald-700 dark:text-emerald-300">Madras Veterinary College Bank</div>
-                      <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">+91 44 2530 4999</div>
-                      <Badge variant="default">Available</Badge>
-                      <div className="text-xs text-gray-500 mt-2">5 Units Available</div>
-                    </div>
-                  </div>
-                  <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-emerald-200 shadow-sm">
-                    <div className="text-center">
-                      <div className="font-bold text-emerald-700 dark:text-emerald-300">Blue Cross Chennai</div>
-                      <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">+91 44 2419 3141</div>
-                      <Badge variant="secondary">Limited Stock</Badge>
-                      <div className="text-xs text-gray-500 mt-2">1 Unit Available</div>
-                    </div>
-                  </div>
-                  <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-emerald-200 shadow-sm">
-                    <div className="text-center">
-                      <div className="font-bold text-emerald-700 dark:text-emerald-300">Tamil Nadu Veterinary Bank</div>
-                      <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">+91 44 2530 5100</div>
-                      <Badge variant="destructive">Out of Stock</Badge>
-                      <div className="text-xs text-gray-500 mt-2">0 Units Available</div>
-                    </div>
-                  </div>
-                </>
+                <div className="col-span-3 text-center text-gray-500">
+                  No clinics found with inventory data in this area.
+                </div>
               )}
             </div>
           </CardContent>
