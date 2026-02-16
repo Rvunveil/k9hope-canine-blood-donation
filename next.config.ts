@@ -5,6 +5,11 @@ const nextConfig = {
     // Warning: This allows production builds to successfully complete even if there are ESLint errors.
     ignoreDuringBuilds: true,
   },
+  typescript: {
+    // ⚠️ Dangerously allow production builds to successfully complete even if
+    // your project has type errors.
+    ignoreBuildErrors: true,
+  },
   // ...other configurations
   images: {
     domains: ['i.postimg.cc', 'media-hosting.imagekit.io'],

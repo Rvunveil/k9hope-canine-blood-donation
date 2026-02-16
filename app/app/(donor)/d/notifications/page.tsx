@@ -18,11 +18,24 @@ import { Bell, Check, X, Calendar as CalendarIcon, Clock, Droplet } from "lucide
 import { format } from "date-fns";
 import HeartLoading from "@/components/custom/HeartLoading";
 
+interface Notification {
+  id: string;
+  userId: string;
+  userRole: string;
+  type: string;
+  title: string;
+  message: string;
+  data: any;
+  read: boolean;
+  createdAt: Date | any;
+  respondedAt?: any;
+}
+
 export default function DonorNotificationsPage() {
   const { userId, role } = useUser();
   const router = useRouter();
 
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedNotification, setSelectedNotification] = useState<any>(null);
   const [acceptDialogOpen, setAcceptDialogOpen] = useState(false);
@@ -50,13 +63,21 @@ export default function DonorNotificationsPage() {
       const snapshot = await getDocs(q);
       const notifs = snapshot.docs.map(doc => ({
         id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate(),
-      }));
+        userId: doc.data().userId || "",
+        userRole: doc.data().userRole || "",
+        type: doc.data().type || "",
+        title: doc.data().title || "",
+        message: doc.data().message || "",
+        data: doc.data().data || {},
+        read: doc.data().read || false, // ← ENSURE read is always boolean
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+        respondedAt: doc.data().respondedAt,
+      })) as Notification[];
 
       // Sort by date, unread first
       notifs.sort((a, b) => {
         if (a.read !== b.read) return a.read ? 1 : -1;
+        // @ts-ignore
         return b.createdAt - a.createdAt;
       });
 

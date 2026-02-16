@@ -137,67 +137,75 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         const storedStatus = (getDecryptedCookie("onboarded") as Onboarded) || "guest";
         const storedPhone = getDecryptedCookie("phone") || null;
 
-        if (storedUserId && storedRole && storedRole !== "guest") {
-          // Fetch fresh data from Firestore to get confirmed onboarded status
-          // Determine collection based on role
+        // FIX: Check if we have valid auth data
+        if (storedUserId && storedUserId !== "" && storedRole && storedRole !== "guest") {
+          // Valid session found - restore immediately
+          console.log("Restoring session:", { storedUserId, storedRole, storedStatus });
+
+          // Set state FIRST to prevent redirect
+          setUserId(storedUserId);
+          setRole(storedRole);
+          setOnboarded(storedStatus);
+          setPhone(storedPhone);
+
+          // Then fetch fresh data in background
           let collectionName = "";
           switch (storedRole) {
             case "donor": collectionName = "donors"; break;
             case "patient": collectionName = "patients"; break;
             case "veterinary": collectionName = "veterinaries"; break;
             case "organisation": collectionName = "organisations"; break;
-            case "hospital": collectionName = "veterinaries"; break; // Handle hospital alias
+            case "hospital": collectionName = "veterinaries"; break;
             default: collectionName = "users";
           }
 
-          if (collectionName) {
+          if (collectionName && collectionName !== "users") {
             try {
               const docRef = doc(db, collectionName, storedUserId);
               const docSnap = await getDoc(docRef);
 
               if (docSnap.exists()) {
                 const userData = docSnap.data();
-                // Update state with fresh data from DB
-                setUserId(storedUserId);
-                setRole(storedRole);
                 const freshOnboardedStatus = userData.onboarded === "yes" ? "yes" : "no";
-                setOnboarded(freshOnboardedStatus as Onboarded);
-                setPhone(userData.phone || storedPhone);
 
-                // Update cookies to match DB if different
+                // Update only if different from cookie
                 if (freshOnboardedStatus !== storedStatus) {
+                  console.log("Updating onboarded status:", freshOnboardedStatus);
+                  setOnboarded(freshOnboardedStatus as Onboarded);
                   setEncryptedCookie("onboarded", freshOnboardedStatus, 7);
                 }
-              } else {
-                // Fallback to cookie data if doc fetch fails (e.g. offline) or doc missing
-                setUserId(storedUserId);
-                setRole(storedRole);
-                setOnboarded(storedStatus);
-                setPhone(storedPhone);
+
+                // Update phone if available
+                if (userData.phone && userData.phone !== storedPhone) {
+                  setPhone(userData.phone);
+                  setEncryptedCookie("phone", userData.phone, 7);
+                }
               }
             } catch (err) {
               console.error("Error fetching fresh user data:", err);
-              // Fallback to cookie data
-              setUserId(storedUserId);
-              setRole(storedRole);
-              setOnboarded(storedStatus);
-              setPhone(storedPhone);
+              // Continue with cookie data - don't logout on error
             }
-          } else {
-            setUserId(storedUserId);
-            setRole(storedRole);
-            setOnboarded(storedStatus);
-            setPhone(storedPhone);
           }
         } else {
-          // Guest or incomplete auth
-          setUserId(storedUserId !== "" ? storedUserId : null);
-          setRole(storedRole);
-          setOnboarded(storedStatus);
-          setPhone(storedPhone);
+          // No valid session found - set as guest
+          console.log("No valid session found");
+          setUserId(null);
+          setRole("guest");
+          setOnboarded("guest");
+          setPhone(null);
         }
       } catch (error) {
         console.error("Auth check error:", error);
+        // On error, try to preserve session if cookies exist
+        const storedUserId = getDecryptedCookie("userId");
+        const storedRole = getDecryptedCookie("role") as UserRole;
+
+        if (storedUserId && storedRole) {
+          setUserId(storedUserId);
+          setRole(storedRole);
+          setOnboarded(getDecryptedCookie("onboarded") as Onboarded || "no");
+          setPhone(getDecryptedCookie("phone"));
+        }
       } finally {
         setIsAuthLoading(false);
       }
@@ -205,6 +213,32 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
     checkAuth();
   }, []);
+
+  // ADD after the main useEffect:
+  useEffect(() => {
+    // Re-check auth when tab becomes visible
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        const storedUserId = getDecryptedCookie("userId");
+        const storedRole = getDecryptedCookie("role") as UserRole;
+
+        // Only update if we lost the session somehow
+        if (storedUserId && storedRole && !userId) {
+          console.log("Restoring lost session");
+          setUserId(storedUserId);
+          setRole(storedRole);
+          setOnboarded(getDecryptedCookie("onboarded") as Onboarded || "no");
+          setPhone(getDecryptedCookie("phone"));
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [userId]);
 
   return (
     <UserContext.Provider value={{ userId, role, onboarded, device, phone, isAuthLoading, setUser, setDevice: updateDevice, clearAuth }}>
@@ -217,25 +251,3 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 export function useUser() {
   return useContext(UserContext);
 }
-
-
-
-
-
-// My Notes
-
-/* 
-
-|| States & Variables ||
-
-userid: string
-
-role: { default: guest, patient, donor, hospital, organisation, admin, banned }
-
-onboarded: {default: guest | boolean}
-
-device: { desktop, mobile }
-
-perf: { low, high } 
-
-*/

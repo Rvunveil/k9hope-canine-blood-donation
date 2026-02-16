@@ -49,7 +49,7 @@ interface DonorStats {
 }
 
 export default function DonorDashboard() {
-  const { userId, role } = useUser();
+  const { userId, role, isAuthLoading } = useUser();
   const router = useRouter();
 
   const [profile, setProfile] = useState<DonorProfile | null>(null);
@@ -202,7 +202,7 @@ export default function DonorDashboard() {
     }
   }
 
-  if (loading) {
+  if (loading || isAuthLoading) {
     return (
       <div className="fixed inset-0 flex items-center justify-center bg-background">
         <HeartLoading />

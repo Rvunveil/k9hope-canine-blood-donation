@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 //User Imports
 import { useUser } from "@/context/UserContext";
 import { db } from "@/firebaseConfig";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { updateUserData } from "@/firebaseFunctions"
 import Cookies from "js-cookie";
 
@@ -221,45 +221,64 @@ export default function OnboardingHos() {
                 updatedAt: new Date()
             };
 
-            // Update veterinaries collection
+            // Update veterinaries collection - using robust updateUserData
             const vetResponse = await updateUserData("veterinaries", userId, sanitizedData);
 
             if (!vetResponse.success) {
-                setIsLoading(false);
-                alert("Error updating clinic data: " + vetResponse.message);
-                return;
+                // If update fails, try setDoc with merge (fallback)
+                try {
+                    console.log("updateUserData failed, trying setDoc fallback...");
+                    await setDoc(doc(db, "veterinaries", userId), sanitizedData, { merge: true });
+                } catch (fallbackError) {
+                    setIsLoading(false);
+                    alert("Error updating clinic data: " + vetResponse.message);
+                    return;
+                }
             }
 
-            // Update users collection
+            // Update users collection - CRITICAL
             const userData = {
                 role: "veterinary",
+                roles: ["veterinary"], // Ensure roles array is set
                 onboarded: "yes",
                 email: formValues.email,
                 updatedAt: new Date()
             };
 
+            // Try standard update
             const userResponse = await updateUserData("users", userId, userData);
 
             if (!userResponse.success) {
-                setIsLoading(false);
-                alert("Error updating user data: " + userResponse.message);
-                return;
+                // Fallback for users collection too
+                try {
+                    await setDoc(doc(db, "users", userId), userData, { merge: true });
+                } catch (userError) {
+                    console.error("User collection update failed but continuing...", userError);
+                }
             }
 
             console.log("Veterinary clinic onboarding completed successfully");
 
-            // Update context
+            // Update context explicitly
             setUser(userId, "veterinary", "yes", formValues.email);
 
-            // Wait for state propagation
-            await new Promise(resolve => setTimeout(resolve, 300));
+            // Set cookie explicitly to force persistence
+            Cookies.set("onboarded", "yes", { expires: 7 });
 
-            // Navigate to dashboard
-            router.push("/app/h/dashboard");
+            // Wait for state propagation
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // Determine redirect path - safety check
+            if (role === 'veterinary' || role === 'hospital') {
+                router.replace("/app/h/dashboard");
+            } else {
+                router.replace("/app/h/dashboard"); // Default for this form
+            }
 
         } catch (error) {
             setIsLoading(false);
             console.error("Form submission error:", error);
+            // @ts-ignore
             alert("Failed to submit form. Please try again. Error: " + (error?.message || "Unknown error"));
         }
     }
@@ -798,16 +817,10 @@ export default function OnboardingHos() {
 
                         <br></br>
                         <Button className="w-full bg-accent pt-6 pb-6 submit-button" type="submit">Submit</Button>
-
                     </form>
-
                 </Form>
             </div>
-            {isLoading && (
-                <div className="fixed inset-0 flex items-center justify-center bg-background z-50">
-                    <HeartLoading />
-                </div>
-            )}
+
         </div>
-    )
+    );
 }

@@ -38,7 +38,7 @@ import { getUserDataById } from "@/firebaseFunctions";
 
 export default function DashboardPage() {
   const sidebar = useStore(useSidebar, (x) => x);
-  const { userId, role, device, setUser } = useUser();
+  const { userId, role, device, setUser, isAuthLoading } = useUser();
   const [profile, setProfile] = useState<any>(null);
 
   useEffect(() => {
@@ -51,8 +51,12 @@ export default function DashboardPage() {
   }, [userId]);
 
   // ✅ Sidebar check inside JSX instead of returning early
-  if (!sidebar) {
-    return <div>Loading Sidebar...</div>;
+  if (!sidebar || isAuthLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen w-full">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      </div>
+    );
   }
 
   return (
@@ -64,7 +68,7 @@ export default function DashboardPage() {
         <GreetingCard name={profile?.o_admin_name} role="organisation" />
       </div>
 
-      
+
 
     </ContentLayout>
   );

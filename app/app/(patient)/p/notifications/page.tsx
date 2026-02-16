@@ -13,11 +13,23 @@ import { Bell, Calendar, Clock, Check, X, Info } from "lucide-react";
 import { format } from "date-fns";
 import HeartLoading from "@/components/custom/HeartLoading";
 
+interface Notification {
+  id: string;
+  userId: string;
+  userRole: string;
+  type: string;
+  title: string;
+  message: string;
+  data: any;
+  read: boolean;
+  createdAt: Date | any;
+}
+
 export default function PatientNotificationsPage() {
   const { userId, role } = useUser();
   const router = useRouter();
 
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -41,13 +53,20 @@ export default function PatientNotificationsPage() {
       const snapshot = await getDocs(q);
       const notifs = snapshot.docs.map(doc => ({
         id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate(),
-      }));
+        userId: doc.data().userId || "",
+        userRole: doc.data().userRole || "",
+        type: doc.data().type || "",
+        title: doc.data().title || "",
+        message: doc.data().message || "",
+        data: doc.data().data || {},
+        read: doc.data().read || false,
+        createdAt: doc.data().createdAt?.toDate() || new Date(),
+      })) as Notification[];
 
       // Sort by date, unread first
       notifs.sort((a, b) => {
         if (a.read !== b.read) return a.read ? 1 : -1;
+        // @ts-ignore
         return b.createdAt - a.createdAt;
       });
 

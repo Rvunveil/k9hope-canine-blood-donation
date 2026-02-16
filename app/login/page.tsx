@@ -165,7 +165,6 @@ const PatientContent: React.FC = () => {
     } catch (error) {
       console.error("Error during patient login:", error);
       console.error("Error details:", JSON.stringify(error, null, 2));
-      console.error("Error stack:", error?.stack);
 
       // Even if there's an error, generate a temporary ID and continue
       const fallbackUserId = generateUserId();
@@ -343,16 +342,16 @@ const VeterinaryContent: React.FC = () => {
       }
 
       // User has veterinary role - check if onboarded
-      const isOnboarded = userStatus.onboarded;
-      console.log("User has veterinary role, onboarded status:", isOnboarded);
-
-      setUser(finalUserId, "veterinary", isOnboarded === "yes" ? "yes" : "no");
+      // Set user context FIRST
+      setUser(finalUserId, "veterinary", userStatus.onboarded === "yes" ? "yes" : "no");
       setIsProcessing(false);
 
-      if (isOnboarded === "yes") {
+      // Check if has veterinary document with onboarded = yes
+      if (userStatus.onboarded === "yes") {
+        console.log("Veterinary fully onboarded, going to dashboard");
         router.push("/app/h/dashboard");
       } else {
-        console.log("Veterinary not fully onboarded, redirecting to onboarding");
+        console.log("Veterinary needs onboarding");
         router.push("/onboarding");
       }
 
@@ -528,8 +527,7 @@ const items = [
     description:
       "Register to see where your donation saves lives.",
     image: "/cs_donor.webp",
-  }
-  ,
+  },
   {
     title: "Continue as Veterinary Clinic Admin",
     description:

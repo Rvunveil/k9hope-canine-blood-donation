@@ -27,7 +27,7 @@ import { doc, getDoc, collection, getDocs, query, where, orderBy } from "firebas
 
 export default function DashboardPage() {
   const sidebar = useStore(useSidebar, (x) => x);
-  const { userId, role, device, setUser } = useUser();
+  const { userId, role, device, setUser, isAuthLoading } = useUser();
   const [profile, setProfile] = useState<any>(null);
   const [userData, setUserData] = useState<any>(null);
   const [clinics, setClinics] = useState<any[]>([]);
@@ -178,8 +178,12 @@ export default function DashboardPage() {
   }, [userId]);
 
   // Sidebar check
-  if (!sidebar) {
-    return <div>Loading Sidebar...</div>;
+  if (!sidebar || isAuthLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen w-full">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      </div>
+    );
   }
 
   const getTimeOfDay = () => {
