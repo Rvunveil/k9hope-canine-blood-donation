@@ -307,75 +307,42 @@ export async function loginUserDatabase(role: string, loginId: string) {
 }
 
 export async function getUserDataById(userId: string, role: string): Promise<UserData | null> {
-    if (role == "patient") {
-        try {
-            const docRef = doc(db, "patients", userId);
-            const docSnap = await getDoc(docRef);
+    let collectionName = "";
 
-            if (docSnap.exists()) {
-                console.log("patient Data:", docSnap.data());
-                return { id: docSnap.id, ...docSnap.data() } as PatientData;
-            } else {
-                console.log("No such patient found!");
-                return null;
-            }
-        } catch (error) {
-            console.error("Error fetching patient:", error);
+    switch (role) {
+        case "patient":
+            collectionName = "patients";
+            break;
+        case "donor":
+            collectionName = "donors";
+            break;
+        case "veterinary":
+        case "hospital":
+            collectionName = "veterinaries";
+            break;
+        case "organisation":
+            collectionName = "organisations";
+            break;
+        default:
+            console.error("Invalid role:", role);
+            return null;
+    }
+
+    try {
+        const docRef = doc(db, collectionName, userId);
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+            console.log(`${role} Data:`, docSnap.data());
+            return { id: docSnap.id, ...docSnap.data() } as any;
+        } else {
+            console.log(`No ${role} found with ID ${userId}`);
             return null;
         }
+    } catch (error) {
+        console.error(`Error fetching ${role} data:`, error);
+        return null;
     }
-    else if (role == "donor") {
-        try {
-            const docRef = doc(db, "donors", userId);
-            const docSnap = await getDoc(docRef);
-
-            if (docSnap.exists()) {
-                console.log("Donor Data:", docSnap.data());
-                return { id: docSnap.id, ...docSnap.data() } as DonorData;
-            } else {
-                console.log("No such Donor found!");
-                return null;
-            }
-        } catch (error) {
-            console.error("Error fetching Donor:", error);
-            return null;
-        }
-    }
-    else if (role == "veterinary") {
-        try {
-            const docRef = doc(db, "veterinaries", userId);
-            const docSnap = await getDoc(docRef);
-
-            if (docSnap.exists()) {
-                console.log("Veterinary Data:", docSnap.data());
-                return { id: docSnap.id, ...docSnap.data() } as VeterinaryData;
-            } else {
-                console.log("No such veterinary found!");
-                return null;
-            }
-        } catch (error) {
-            console.error("Error fetching veterinary:", error);
-            return null;
-        }
-    }
-    else if (role == "organisation") {
-        try {
-            const docRef = doc(db, "organisations", userId);
-            const docSnap = await getDoc(docRef);
-
-            if (docSnap.exists()) {
-                console.log("organisation Data:", docSnap.data());
-                return { id: docSnap.id, ...docSnap.data() } as OrganisationData;
-            } else {
-                console.log("No such organisation found!");
-                return null;
-            }
-        } catch (error) {
-            console.error("Error fetching organisation:", error);
-            return null;
-        }
-    }
-    return null;
 }
 
 

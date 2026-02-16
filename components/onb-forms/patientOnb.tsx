@@ -224,6 +224,7 @@ export default function OnboardingPat() {
                     })
                 ),
                 onboarded: "yes", // CRITICAL: Ensure onboarded is "yes"
+                request_status: "pending", // ✅ Add this
                 updatedAt: new Date()
             };
 

@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { useEffect, useState } from "react";
 import { useUser } from "@/context/UserContext"; // Import user context
 import { useRouter } from "next/navigation";
@@ -77,7 +78,7 @@ const AppPage = () => {
     }, [onboarded, role, router]);
 
     useEffect(() => {
-        if (onboarded === "yes" && role === "hospital") {
+        if (onboarded === "yes" && (role === "veterinary" || role === "hospital")) {
             const timeout = setTimeout(() => {
                 router.push("/app/h/dashboard");
             }, 1000);
@@ -100,6 +101,7 @@ const AppPage = () => {
             switch (role) {
                 case "patient":
                 case "donor":
+                case "veterinary":
                 case "hospital":
                 case "organisation":
                     // Redirects are handled by useEffect hooks above
@@ -134,6 +136,7 @@ const AppPage = () => {
                     return <PatOnb />;
                 case "donor":
                     return <DonOnb />;
+                case "veterinary":
                 case "hospital":
                     return <HosOnb />;
                 case "organisation":

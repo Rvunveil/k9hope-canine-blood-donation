@@ -333,46 +333,26 @@ const VeterinaryContent: React.FC = () => {
       const userStatus = await getOnboardedStatus(finalUserId, "veterinary");
       console.log("getOnboardedStatus returned:", userStatus);
 
-      // Check if user exists in users collection
-      if (!userStatus.exists) {
-        // New User - redirect to onboarding with intended role
-        console.log("New user detected, redirecting to onboarding");
-        setUser(finalUserId, intendedRole as any, "no");
+      // If user doesn't have veterinary role yet (new to this role)
+      if (!userStatus.hasRole) {
+        console.log("User doesn't have veterinary role, will be created by loginUserDatabase");
+        setUser(finalUserId, "veterinary", "no");
         setIsProcessing(false);
         router.replace("/onboarding");
         return;
       }
 
-      // Old User - redirect to specific dashboard based on role
-      const userRole = userStatus.role;
+      // User has veterinary role - check if onboarded
       const isOnboarded = userStatus.onboarded;
-      console.log("Existing user detected - role:", userRole, "onboarded:", isOnboarded);
+      console.log("User has veterinary role, onboarded status:", isOnboarded);
 
-      setUser(finalUserId, userRole, isOnboarded === "yes" ? "yes" : "no");
+      setUser(finalUserId, "veterinary", isOnboarded === "yes" ? "yes" : "no");
       setIsProcessing(false);
 
-      // STRICT CHECK: Only redirect to dashboard if onboarded === 'yes'
       if (isOnboarded === "yes") {
-        // Redirect to role-specific dashboard
-        switch (userRole) {
-          case "patient":
-            router.push("/app/p/dashboard");
-            break;
-          case "donor":
-            router.push("/app/d/dashboard");
-            break;
-          case "veterinary":
-            router.push("/app/h/dashboard");
-            break;
-          case "organisation":
-            router.push("/app/o/dashboard");
-            break;
-          default:
-            router.push("/app");
-        }
+        router.push("/app/h/dashboard");
       } else {
-        // FORCE ONBOARDING: If document missing OR onboarded is not 'yes'
-        console.log("User not fully onboarded, redirecting to onboarding");
+        console.log("Veterinary not fully onboarded, redirecting to onboarding");
         router.push("/onboarding");
       }
 
@@ -555,7 +535,7 @@ const items = [
     description:
       "Manage a local clinic branch in the Ambattur network and sync data with the main hospital.",
     image: "/cs_hospital.webp",
-    comingSoon: true,
+    // comingSoon removed
   },
   {
     title: "Continue as Veterinary Hospital",
@@ -576,7 +556,7 @@ const RoleContent: React.FC<RoleContentProps> = ({ role }) => {
       return <PatientContent />
     case "Continue as Donor":
       return <DonorContent />
-    case "Continue as Veterinary Clinic":
+    case "Continue as Veterinary Clinic Admin":
       return <VeterinaryContent />
     case "Continue as Organisation/NGO":
       return <OrganisationContent />

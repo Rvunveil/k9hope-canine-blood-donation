@@ -42,12 +42,16 @@ export default function DashboardPage() {
   const [profile, setProfile] = useState<any>(null);
 
   useEffect(() => {
-    async function fetchHospitalData() {
-      if (!userId) return; // ✅ Safe condition inside useEffect
-      const data = await getUserDataById(userId, "hospital");
+    async function fetchVeterinaryData() {
+      if (!userId) return;
+      // Try veterinary first, fallback to hospital for backward compatibility
+      let data = await getUserDataById(userId, "veterinary");
+      if (!data) {
+        data = await getUserDataById(userId, "hospital");
+      }
       setProfile(data);
     }
-    fetchHospitalData();
+    fetchVeterinaryData();
   }, [userId]);
 
   // ✅ Sidebar check inside JSX instead of returning early
@@ -61,10 +65,13 @@ export default function DashboardPage() {
 
 
       <div>
-        <GreetingCard name={profile?.h_admin_name} role="hospital" />
+        <GreetingCard
+          name={profile?.v_admin_name || profile?.h_admin_name || "Admin"}
+          role="veterinary"
+        />
       </div>
 
-      
+
 
     </ContentLayout>
   );

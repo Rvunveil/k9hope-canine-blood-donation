@@ -17,7 +17,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
   const [delayedUI, setDelayedUI] = useState<React.ReactNode>(null);
 
   useEffect(() => {
-    if (role !== "hospital") {
+    if (role !== "hospital" && role !== "veterinary") {
       const timeout = setTimeout(() => {
         router.push("/");
       }, 1000);
