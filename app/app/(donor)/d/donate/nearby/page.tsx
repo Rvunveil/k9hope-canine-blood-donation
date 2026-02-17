@@ -114,6 +114,8 @@ export default function NearbyDonationsPage() {
           clinicAddress: `${clinicData.h_address_line1 || ""}, ${clinicData.h_city || ""}`,
           linkedPatientName: data.linkedPatientName,
           status: data.status,
+          isVerified: clinicData.isVerified || false, // Added
+          isPending: clinicData.isPending || false, // Added
         });
       }
 
@@ -248,17 +250,24 @@ function NearbyRequestCard({ request, donorCity }: any) {
         {/* Header */}
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1">
-            <h3 className="text-xl font-bold">🏥 {request.clinicName}</h3>
+            <h3 className="text-xl font-bold flex items-center gap-2">
+              🏥 {request.clinicName}
+              {request.isVerified && (
+                <Badge className="bg-blue-500 text-xs">✓ Verified</Badge>
+              )}
+            </h3>
             {request.linkedPatientName && (
               <p className="text-sm text-gray-600">For: {request.linkedPatientName}</p>
             )}
           </div>
-          {isSameCity && (
-            <Badge className="bg-green-500">Your City</Badge>
-          )}
-          {request.isUrgent === "yes" && (
-            <Badge className="bg-red-500">Urgent</Badge>
-          )}
+          <div className="flex gap-2">
+            {isSameCity && (
+              <Badge className="bg-green-500">Your City</Badge>
+            )}
+            {request.isUrgent === "yes" && (
+              <Badge className="bg-red-500">Urgent</Badge>
+            )}
+          </div>
         </div>
 
         {/* Info Grid */}

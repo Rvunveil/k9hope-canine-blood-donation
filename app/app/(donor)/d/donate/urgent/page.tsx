@@ -134,6 +134,7 @@ export default function UrgentDonationsPage() {
           linkedPatientName: data.linkedPatientName,
           status: data.status,
           createdAt: data.createdAt,
+          isVerified: clinicData.isVerified || false, // Added
         });
       }
 
@@ -441,6 +442,9 @@ function UrgentRequestCard({ request, donorCity, onBookAppointment }: any) {
           <div className="flex-1">
             <CardTitle className="text-xl flex items-center gap-2">
               🏥 {request.clinicName}
+              {request.isVerified && (
+                <Badge className="bg-blue-500 text-xs">✓ Verified</Badge>
+              )}
             </CardTitle>
             {request.linkedPatientName && (
               <p className="text-sm text-gray-600 mt-1">

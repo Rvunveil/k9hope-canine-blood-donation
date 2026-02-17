@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { doc, updateDoc, collection, query, where, getDocs, Timestamp } from "firebase/firestore";
+import { doc, updateDoc, collection, query, where, getDocs, deleteDoc, Timestamp } from "firebase/firestore"; // Added deleteDoc
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"; // Added Table imports
 import { useUser } from "@/context/UserContext";
 import { db } from "@/firebaseConfig";
 import { ContentLayout } from "@/components/admin-panel/content-layout";
@@ -53,6 +54,7 @@ export default function PatientManagementPage() {
   const [regularClosedCases, setRegularClosedCases] = useState<PatientCase[]>([]);
   const [emergencyOpenCases, setEmergencyOpenCases] = useState<PatientCase[]>([]);
   const [emergencyClosedCases, setEmergencyClosedCases] = useState<PatientCase[]>([]);
+  const [pendingHospitals, setPendingHospitals] = useState<any[]>([]); // New state
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -68,6 +70,7 @@ export default function PatientManagementPage() {
 
   useEffect(() => {
     fetchAllCases();
+    fetchPendingHospitals(); // Fetch pending hospitals
   }, [userId]);
 
   async function fetchAllCases() {
@@ -121,8 +124,6 @@ export default function PatientManagementPage() {
         c.p_urgencyRequirment === "immediate" || c.p_urgencyRequirment === "within_24_hours"
       );
 
-      setRegularOpenCases(regOpen);
-      setRegularClosedCases(regClosed);
       setEmergencyOpenCases(emgOpen);
       setEmergencyClosedCases(emgClosed);
 
@@ -132,6 +133,74 @@ export default function PatientManagementPage() {
       alert("Failed to fetch patient cases. Please refresh.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function fetchPendingHospitals() {
+    try {
+      const pendingRef = collection(db, "pending-hospitals");
+      const q = query(pendingRef, where("status", "==", "pending_verification"));
+      const snapshot = await getDocs(q);
+
+      const pending = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        requestedAt: doc.data().requestedAt?.toDate(),
+      }));
+
+      setPendingHospitals(pending);
+    } catch (error) {
+      console.error("Error fetching pending hospitals:", error);
+    }
+  }
+
+  async function handleApproveHospital(pendingId: string, hospitalId: string) {
+    try {
+      // Update hospital status
+      await updateDoc(doc(db, "hospitals", hospitalId), {
+        isVerified: true,
+        isPending: false,
+        verifiedAt: Timestamp.now(),
+        verifiedBy: userId,
+      });
+
+      // Update pending record
+      await updateDoc(doc(db, "pending-hospitals", pendingId), {
+        status: "approved",
+        approvedAt: Timestamp.now(),
+        approvedBy: userId,
+      });
+
+      alert("✅ Hospital approved and added to network!");
+      fetchPendingHospitals();
+
+    } catch (error) {
+      console.error("Error approving hospital:", error);
+      alert("❌ Failed to approve hospital");
+    }
+  }
+
+  async function handleRejectHospital(pendingId: string, hospitalId: string) {
+    const reason = prompt("Reason for rejection?");
+    if (!reason) return;
+
+    try {
+      // Delete from hospitals
+      await deleteDoc(doc(db, "hospitals", hospitalId));
+
+      // Update pending record
+      await updateDoc(doc(db, "pending-hospitals", pendingId), {
+        status: "rejected",
+        rejectedAt: Timestamp.now(),
+        rejectedBy: userId,
+        rejectionReason: reason,
+      });
+
+      alert("Hospital rejected");
+      fetchPendingHospitals();
+
+    } catch (error) {
+      console.error("Error rejecting hospital:", error);
     }
   }
 
@@ -342,6 +411,85 @@ export default function PatientManagementPage() {
         totalPages={getTotalPages()}
         onPageChange={setCurrentPage}
       />
+
+      {/* Pending Hospitals Section */}
+      {pendingHospitals.length > 0 && (
+        <Card className="mt-8 border-orange-200 bg-orange-50/50 dark:bg-orange-950/10">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-orange-500" />
+              Pending Hospital Verifications
+              <Badge className="bg-orange-500">{pendingHospitals.length}</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Hospital Name</TableHead>
+                  <TableHead>Address</TableHead>
+                  <TableHead>Phone</TableHead>
+                  <TableHead>Added By</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pendingHospitals.map((hospital) => (
+                  <TableRow key={hospital.id}>
+                    <TableCell className="font-medium">
+                      {hospital.h_name}
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm">
+                        <div>{hospital.h_address_line1}</div>
+                        <div className="text-gray-500">
+                          {hospital.h_city}, {hospital.h_pincode}
+                        </div>
+                        {hospital.h_landmark && (
+                          <div className="text-gray-400 text-xs">
+                            Near: {hospital.h_landmark}
+                          </div>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>{hospital.phone}</TableCell>
+                    <TableCell>
+                      <div className="text-sm">
+                        <div>{hospital.addedByPatientName}</div>
+                        <div className="text-gray-500">Patient</div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {hospital.requestedAt ? format(hospital.requestedAt, "PPp") : "N/A"}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          className="bg-green-600 hover:bg-green-700"
+                          onClick={() => handleApproveHospital(hospital.id, hospital.hospitalId)}
+                        >
+                          <Check className="h-4 w-4 mr-1" />
+                          Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => handleRejectHospital(hospital.id, hospital.hospitalId)}
+                        >
+                          <X className="h-4 w-4 mr-1" />
+                          Reject
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Dialogs */}
       <DetailsDialog

@@ -32,38 +32,142 @@ export default function RequestBloodPage() {
   const [quantity, setQuantity] = useState("");
   const [hospitals, setHospitals] = useState<any[]>([]);
 
-  // Fetch user profile and available hospitals
-  useEffect(() => {
-    async function fetchInitialData() {
-      if (!userId) return;
+  // Add Hospital states
+  const [showAddHospital, setShowAddHospital] = useState(false);
+  const [newHospitalData, setNewHospitalData] = useState({
+    name: "",
+    address: "",
+    city: "",
+    pincode: "",
+    phone: "",
+    landmark: "",
+  });
 
+  // Fetch user profile
+  useEffect(() => {
+    async function fetchProfile() {
+      if (!userId) return;
       try {
-        // Fetch user profile
         const profileDoc = await getDoc(doc(db, "patients", userId));
         if (profileDoc.exists()) {
-          const profileData = profileDoc.data();
-          setProfile(profileData);
-
-          // Fetch hospitals in same city
-          const hospitalsRef = collection(db, "hospitals");
-          const q = query(hospitalsRef, where("h_city", "==", profileData.p_city || "Chennai"));
-          const snapshot = await getDocs(q);
-
-          const hospitalsData = snapshot.docs.map(doc => ({
-            id: doc.id,
-            name: doc.data().h_name,
-            city: doc.data().h_city,
-          }));
-
-          setHospitals(hospitalsData);
+          const data = profileDoc.data();
+          setProfile(data);
+          // Set default city for new hospital
+          setNewHospitalData(prev => ({ ...prev, city: data.p_city || "Chennai" }));
         }
       } catch (error) {
-        console.error("Error fetching data:", error);
+        console.error("Error fetching profile:", error);
+      }
+    }
+    fetchProfile();
+  }, [userId]);
+
+  // Fetch hospitals based on city
+  useEffect(() => {
+    async function fetchHospitals() {
+      try {
+        const hospitalsRef = collection(db, "hospitals");
+        // Convert to lowercase for loose matching or keep exact if data is clean
+        // For now using exact match as in existing code, but fallback to "Chennai"
+        const cityToQuery = profile?.p_city || "Chennai";
+
+        const q = query(hospitalsRef, where("h_city", "==", cityToQuery));
+        const snapshot = await getDocs(q);
+
+        const hospitalsData = snapshot.docs.map(doc => ({
+          id: doc.id,
+          name: doc.data().h_name,
+          city: doc.data().h_city,
+          isVerified: doc.data().isVerified || false,
+        }));
+
+        setHospitals(hospitalsData);
+      } catch (error) {
+        console.error("Error fetching hospitals:", error);
       }
     }
 
-    fetchInitialData();
-  }, [userId]);
+    if (profile) {
+      fetchHospitals();
+    }
+  }, [profile]);
+
+  async function handleAddNewHospital() {
+    if (!newHospitalData.name || !newHospitalData.address || !newHospitalData.phone) {
+      alert("Please fill all required fields");
+      return;
+    }
+
+    try {
+      // Create new hospital record
+      const hospitalData = {
+        h_name: newHospitalData.name,
+        h_address_line1: newHospitalData.address,
+        h_city: newHospitalData.city,
+        h_pincode: newHospitalData.pincode,
+        phone: newHospitalData.phone,
+        h_landmark: newHospitalData.landmark,
+
+        // Patient-added metadata
+        addedBy: "patient",
+        addedByUserId: userId,
+        addedByPatientName: profile?.p_name || "Patient",
+
+        // Verification status
+        isVerified: false,
+        isPending: true,
+
+        // Auto-generated
+        email: "", // Admin will add later
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+
+        // Default values
+        onboarded: "no",
+        role: "veterinary",
+      };
+
+      const docRef = await addDoc(collection(db, "hospitals"), hospitalData);
+
+      // Also add to pending-hospitals collection for admin review
+      await addDoc(collection(db, "pending-hospitals"), {
+        ...hospitalData,
+        hospitalId: docRef.id,
+        status: "pending_verification",
+        requestedAt: Timestamp.now(),
+      });
+
+      alert("✅ Hospital added! You can now select it for your blood request.");
+
+      // Refresh hospitals list locally to include the new one immediately
+      setHospitals(prev => [...prev, {
+        id: docRef.id,
+        name: newHospitalData.name,
+        city: newHospitalData.city,
+        isVerified: false,
+      }]);
+
+      // Select the new hospital automatically
+      setSelectedHospital(docRef.id);
+
+      // Close dialog
+      setShowAddHospital(false);
+
+      // Reset form
+      setNewHospitalData({
+        name: "",
+        address: "",
+        city: profile?.p_city || "Chennai",
+        pincode: "",
+        phone: "",
+        landmark: "",
+      });
+
+    } catch (error) {
+      console.error("Error adding hospital:", error);
+      alert("❌ Failed to add hospital. Please try again.");
+    }
+  }
 
   // Fetch blood requests
   useEffect(() => {
@@ -251,78 +355,188 @@ export default function RequestBloodPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={requestDialogOpen} onOpenChange={setRequestDialogOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Submit Blood Request</DialogTitle>
-          </DialogHeader>
+      <div className="space-y-4">
+        <div>
+          <Label>Select Hospital *</Label>
 
-          <div className="space-y-4">
-            <div>
-              <Label>Select Hospital *</Label>
-              <Select value={selectedHospital} onValueChange={setSelectedHospital}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose hospital" />
-                </SelectTrigger>
-                <SelectContent>
-                  {hospitals.map(hospital => (
+          <div className="space-y-2">
+            {/* Hospital Selector */}
+            <Select value={selectedHospital} onValueChange={setSelectedHospital}>
+              <SelectTrigger>
+                <SelectValue placeholder="Choose hospital" />
+              </SelectTrigger>
+              <SelectContent>
+                {hospitals.length === 0 ? (
+                  <SelectItem value="none" disabled>
+                    No hospitals found in {profile?.p_city}
+                  </SelectItem>
+                ) : (
+                  hospitals.map(hospital => (
                     <SelectItem key={hospital.id} value={hospital.id}>
-                      {hospital.name} - {hospital.city}
+                      <div className="flex items-center gap-2">
+                        <span>{hospital.name}</span>
+                        {hospital.isVerified && (
+                          <Badge className="bg-green-500 text-xs h-5">✓ Verified</Badge>
+                        )}
+                        {!hospital.isVerified && (
+                          <Badge variant="outline" className="text-xs h-5 text-orange-500 border-orange-500">Pending</Badge>
+                        )}
+                      </div>
                     </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
 
-            <div>
-              <Label>Blood Type: {profile?.p_bloodgroup}</Label>
-              <p className="text-xs text-gray-500">From your profile</p>
-            </div>
+            {/* Add Hospital Button */}
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full border-dashed"
+              onClick={() => setShowAddHospital(true)}
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Hospital not listed? Add new hospital
+            </Button>
+          </div>
+        </div>
 
-            <div>
-              <Label>Urgency Level *</Label>
-              <Select value={urgency} onValueChange={setUrgency}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="yes">🚨 Urgent (Within 24 hours)</SelectItem>
-                  <SelectItem value="no">⏰ Normal (Within 7 days)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+        <div>
+          <Label>Blood Type: {profile?.p_bloodgroup}</Label>
+          <p className="text-xs text-gray-500">From your profile</p>
+        </div>
 
+        <div>
+          <Label>Urgency Level *</Label>
+          <Select value={urgency} onValueChange={setUrgency}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="yes">🚨 Urgent (Within 24 hours)</SelectItem>
+              <SelectItem value="no">⏰ Normal (Within 7 days)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div>
+          <Label>Quantity Needed (ml)</Label>
+          <Input
+            type="number"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            placeholder="450"
+          />
+        </div>
+
+        <div>
+          <Label>Reason for Request</Label>
+          <Textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Describe why blood is needed..."
+            rows={3}
+          />
+        </div>
+      </div>
+
+      <DialogFooter>
+        <Button variant="outline" onClick={() => setRequestDialogOpen(false)}>
+          Cancel
+        </Button>
+        <Button onClick={handlePostRequest} className="bg-red-600 hover:bg-red-700">
+          Submit Request
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+      </Dialog >
+
+    {/* Add Hospital Dialog */ }
+    < Dialog open = { showAddHospital } onOpenChange = { setShowAddHospital } >
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Add Your Hospital/Clinic</DialogTitle>
+          <p className="text-sm text-gray-500">
+            Where are you currently getting treatment for your dog?
+          </p>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div>
+            <Label>Hospital/Clinic Name *</Label>
+            <Input
+              placeholder="e.g., Blue Cross Veterinary Clinic"
+              value={newHospitalData.name}
+              onChange={(e) => setNewHospitalData({ ...newHospitalData, name: e.target.value })}
+            />
+          </div>
+
+          <div>
+            <Label>Complete Address *</Label>
+            <Textarea
+              placeholder="Street, Area, Locality"
+              value={newHospitalData.address}
+              onChange={(e) => setNewHospitalData({ ...newHospitalData, address: e.target.value })}
+              rows={3}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label>Quantity Needed (ml)</Label>
+              <Label>City</Label>
               <Input
-                type="number"
-                value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
-                placeholder="450"
+                value={newHospitalData.city}
+                onChange={(e) => setNewHospitalData({ ...newHospitalData, city: e.target.value })}
               />
             </div>
 
             <div>
-              <Label>Reason for Request</Label>
-              <Textarea
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="Describe why blood is needed..."
-                rows={3}
+              <Label>Pincode</Label>
+              <Input
+                placeholder="600001"
+                value={newHospitalData.pincode}
+                onChange={(e) => setNewHospitalData({ ...newHospitalData, pincode: e.target.value })}
               />
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRequestDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handlePostRequest} className="bg-red-600 hover:bg-red-700">
-              Submit Request
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </ContentLayout>
+          <div>
+            <Label>Hospital Phone Number *</Label>
+            <Input
+              placeholder="044 1234 5678"
+              value={newHospitalData.phone}
+              onChange={(e) => setNewHospitalData({ ...newHospitalData, phone: e.target.value })}
+            />
+          </div>
+
+          <div>
+            <Label>Nearby Landmark (Optional)</Label>
+            <Input
+              placeholder="e.g., Near Central Railway Station"
+              value={newHospitalData.landmark}
+              onChange={(e) => setNewHospitalData({ ...newHospitalData, landmark: e.target.value })}
+            />
+          </div>
+
+          <div className="bg-blue-50 dark:bg-blue-950/20 p-4 rounded-lg border border-blue-200">
+            <p className="text-sm text-blue-800 dark:text-blue-200">
+              <strong>ℹ️ Note:</strong> This hospital will be added to our network and
+              reviewed by admin. Donors will be able to see this location for blood donation.
+            </p>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setShowAddHospital(false)}>
+            Cancel
+          </Button>
+          <Button onClick={handleAddNewHospital} className="bg-green-600 hover:bg-green-700">
+            <Plus className="h-4 w-4 mr-2" />
+            Add Hospital
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+      </Dialog >
+    </ContentLayout >
   );
 }
