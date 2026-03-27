@@ -116,6 +116,57 @@ const formSchema = z.object({
 });
 
 
+// ── Image compression (reused from MedicalDocumentsSection) ────────
+async function compressImageOnb(file: File): Promise<{ base64: string; mimeType: string }> {
+  if (file.type === "application/pdf") {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        resolve({ base64: result.split(",")[1], mimeType: file.type });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const MAX = 1024;
+      let { width, height } = img;
+      if (width > MAX || height > MAX) {
+        const ratio = Math.min(MAX / width, MAX / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return reject(new Error("Canvas not supported"));
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) return reject(new Error("Compression failed"));
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as string;
+            resolve({ base64: result.split(",")[1], mimeType: "image/jpeg" });
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        },
+        "image/jpeg",
+        0.82
+      );
+    };
+    img.onerror = reject;
+    img.src = objectUrl;
+  });
+}
+
 export default function OnboardingPat() {
 
     const { userId, role, device, setUser } = useUser();
@@ -151,6 +202,20 @@ export default function OnboardingPat() {
 
     //loading state
     const [isLoading, setIsLoading] = useState(false);
+
+    // Medical document upload state
+    const [docFile, setDocFile] = useState<File | null>(null);
+    const [docAnalyzing, setDocAnalyzing] = useState(false);
+    const [docUploading, setDocUploading] = useState(false);
+    const [docResult, setDocResult] = useState<{
+        score: number;
+        flags: string[];
+        summary: string;
+        urgency: string;
+        fileUrl: string;
+        fileName: string;
+    } | null>(null);
+    const [docError, setDocError] = useState<string | null>(null);
 
 
 
@@ -203,6 +268,41 @@ export default function OnboardingPat() {
     }, [patient?.phone]);
 
 
+    // Medical document upload handler
+    const handleDocumentUpload = async (file: File) => {
+        setDocError(null);
+        setDocFile(file);
+        setDocUploading(true);
+        try {
+            const { base64, mimeType } = await compressImageOnb(file);
+            const uploadClient = new UploadClient({ publicKey: process.env.NEXT_PUBLIC_UPLOADCARE_PUB_KEY || "" });
+            const uploaded = await uploadClient.uploadFile(file);
+            const fileUrl = `https://ucarecdn.com/${uploaded.uuid}/${encodeURIComponent(file.name)}`;
+            setDocUploading(false);
+            setDocAnalyzing(true);
+            const res = await fetch("/api/ocr-flag", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ base64Data: base64, mimeType }),
+            });
+            const result = await res.json();
+            setDocResult({
+                score: result.score ?? 0,
+                flags: result.flags ?? [],
+                summary: result.summary ?? "No summary",
+                urgency: result.urgency ?? "low",
+                fileUrl,
+                fileName: file.name,
+            });
+            setDocAnalyzing(false);
+        } catch (err: any) {
+            console.error("Doc upload error:", err);
+            setDocError("Could not analyze document. You can still submit the form.");
+            setDocUploading(false);
+            setDocAnalyzing(false);
+        }
+    };
+
     // SUBMIT FORM FUNCTION
     // SUBMIT FORM FUNCTION
     async function onSubmit(values: z.infer<typeof formSchema>) {
@@ -225,7 +325,18 @@ export default function OnboardingPat() {
                 ),
                 onboarded: "yes", // CRITICAL: Ensure onboarded is "yes"
                 request_status: "pending", // ✅ Add this
-                updatedAt: new Date()
+                updatedAt: new Date(),
+                ...(docResult ? {
+                    initialDocument: {
+                        fileName: docResult.fileName,
+                        fileUrl: docResult.fileUrl,
+                        ocrScore: docResult.score,
+                        ocrFlags: docResult.flags,
+                        ocrSummary: docResult.summary,
+                        ocrUrgency: docResult.urgency,
+                        uploadedAt: new Date(),
+                    }
+                } : {}),
             };
 
             // Update patients collection
@@ -890,6 +1001,112 @@ export default function OnboardingPat() {
 
 
 
+
+                        {/* ── Medical Document Upload (Optional) ── */}
+                        <h1 className="font-bold border-b-2 border-green-600 pt-4 pb-2">
+                            🩺 Medical Document Upload{" "}
+                            <span className="text-sm font-normal text-gray-500">(Optional — speeds up blood matching)</span>
+                        </h1>
+
+                        <div className="space-y-3">
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                                Upload your vet's report, blood test result, or any medical document. Our AI will analyze it and assign a severity score to help match you with donors faster.
+                            </p>
+
+                            {/* Drop zone */}
+                            {!docResult && (
+                                <label
+                                    className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl cursor-pointer transition-colors
+                                        ${docAnalyzing || docUploading
+                                            ? "border-violet-400 bg-violet-50 dark:bg-violet-950/20 pointer-events-none"
+                                            : "border-gray-300 dark:border-gray-600 hover:border-violet-400 hover:bg-violet-50/50 dark:hover:bg-violet-950/20"
+                                        }`}
+                                >
+                                    <input
+                                        type="file"
+                                        className="hidden"
+                                        accept="image/jpeg,image/png,image/webp,application/pdf"
+                                        disabled={docAnalyzing || docUploading}
+                                        onChange={(e) => {
+                                            const file = e.target.files?.[0];
+                                            if (file) handleDocumentUpload(file);
+                                        }}
+                                    />
+                                    {docUploading ? (
+                                        <div className="text-center space-y-1">
+                                            <div className="animate-spin h-6 w-6 border-2 border-violet-500 border-t-transparent rounded-full mx-auto" />
+                                            <p className="text-xs text-violet-600">Uploading...</p>
+                                        </div>
+                                    ) : docAnalyzing ? (
+                                        <div className="text-center space-y-1">
+                                            <div className="animate-spin h-6 w-6 border-2 border-violet-500 border-t-transparent rounded-full mx-auto" />
+                                            <p className="text-xs text-violet-600 font-medium">AI analyzing document...</p>
+                                        </div>
+                                    ) : (
+                                        <div className="text-center space-y-1">
+                                            <svg className="h-8 w-8 mx-auto text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                                            </svg>
+                                            <p className="text-sm text-gray-600 dark:text-gray-400">Click to upload JPG, PNG, WebP or PDF</p>
+                                            <p className="text-xs text-gray-400">Max 10MB</p>
+                                        </div>
+                                    )}
+                                </label>
+                            )}
+
+                            {/* Error */}
+                            {docError && (
+                                <p className="text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 rounded-lg px-3 py-2">
+                                    ⚠ {docError}
+                                </p>
+                            )}
+
+                            {/* Result card */}
+                            {docResult && (
+                                <div className={`rounded-xl border p-4 space-y-2 ${
+                                    docResult.score >= 76 ? "border-red-300 bg-red-50 dark:bg-red-950/20" :
+                                    docResult.score >= 51 ? "border-orange-300 bg-orange-50 dark:bg-orange-950/20" :
+                                    docResult.score >= 26 ? "border-yellow-300 bg-yellow-50 dark:bg-yellow-950/20" :
+                                    "border-green-300 bg-green-50 dark:bg-green-950/20"
+                                }`}>
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-sm font-semibold text-gray-800 dark:text-gray-200 truncate max-w-[60%]">
+                                            📄 {docResult.fileName}
+                                        </span>
+                                        <div className="flex items-center gap-2">
+                                            <span className={`text-lg font-bold ${
+                                                docResult.score >= 76 ? "text-red-600" :
+                                                docResult.score >= 51 ? "text-orange-600" :
+                                                docResult.score >= 26 ? "text-yellow-600" : "text-green-600"
+                                            }`}>{docResult.score}/100</span>
+                                            <span className={`text-xs uppercase font-bold px-2 py-0.5 rounded-full ${
+                                                docResult.urgency === "critical" ? "bg-red-100 text-red-700" :
+                                                docResult.urgency === "high" ? "bg-orange-100 text-orange-700" :
+                                                docResult.urgency === "medium" ? "bg-yellow-100 text-yellow-700" :
+                                                "bg-green-100 text-green-700"
+                                            }`}>{docResult.urgency}</span>
+                                        </div>
+                                    </div>
+                                    <p className="text-xs italic text-gray-600 dark:text-gray-400">"{docResult.summary}"</p>
+                                    {docResult.flags.length > 0 && (
+                                        <div className="flex flex-wrap gap-1">
+                                            {docResult.flags.map((flag, i) => (
+                                                <span key={i} className="text-[10px] bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 px-2 py-0.5 rounded-full font-medium">
+                                                    {flag}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => { setDocResult(null); setDocFile(null); setDocError(null); }}
+                                        className="text-xs text-gray-500 hover:text-red-500 underline"
+                                    >
+                                        Remove and re-upload
+                                    </button>
+                                </div>
+                            )}
+                        </div>
 
                         <br></br>
                         <Button
