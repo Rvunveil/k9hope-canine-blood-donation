@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
     const { fileUrl, mimeType } = await request.json();
 
     if (!fileUrl || !mimeType) {
+      console.error("Missing required fields:", { fileUrl: !!fileUrl, mimeType: !!mimeType });
       return NextResponse.json(
         { error: "fileUrl and mimeType are required" },
         { status: 400 }
@@ -42,29 +43,33 @@ export async function POST(request: NextRequest) {
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      console.error("GEMINI_API_KEY is not set");
+      console.error("GEMINI_API_KEY is not set in environment variables");
       return NextResponse.json(FALLBACK_RESPONSE);
     }
 
     // Fetch file from Uploadcare CDN and convert to base64
-    const fileRes = await fetch(fileUrl);
+    // Uploadcare needs a proper User-Agent header for server-side fetches
+    console.log("Fetching file from Uploadcare:", fileUrl);
+    const fileRes = await fetch(fileUrl, {
+      headers: {
+        "User-Agent": "K9Hope-OCR-Server/1.0",
+        "Accept": "*/*",
+      },
+    });
+
     if (!fileRes.ok) {
-      console.error("Failed to fetch file from URL:", fileUrl);
+      console.error("Failed to fetch file from Uploadcare URL:", fileUrl, "status:", fileRes.status, "statusText:", fileRes.statusText);
       return NextResponse.json(FALLBACK_RESPONSE);
     }
 
     const arrayBuffer = await fileRes.arrayBuffer();
     const base64 = Buffer.from(arrayBuffer).toString("base64");
+    console.log("File fetched successfully. Base64 length:", base64.length, "mimeType:", mimeType);
 
-    // Determine media resolution based on mime type
-    const isImage = mimeType.startsWith("image/");
-    const mediaResolution = isImage ? "high" : "medium";
+    // Initialize Gemini — NO apiVersion parameter (not supported by @google/genai)
+    const ai = new GoogleGenAI({ apiKey });
 
-    // Initialize Gemini with v1alpha for media resolution support
-    const ai = new GoogleGenAI({
-      apiKey,
-      apiVersion: "v1alpha",
-    });
+    console.log("Calling Gemini with model: gemini-2.0-flash, mimeType:", mimeType);
 
     const response = await ai.models.generateContent({
       model: "gemini-2.0-flash",
@@ -85,17 +90,18 @@ export async function POST(request: NextRequest) {
         },
       ],
       config: {
+        // ONLY responseMimeType — no mediaResolution or thinkingConfig
+        // (those are not supported by gemini-2.0-flash)
         responseMimeType: "application/json",
-        mediaResolution: mediaResolution as any,
-        thinkingConfig: { thinkingLevel: "low" as any },
       },
     });
 
     // Extract text from response
     const responseText = response?.candidates?.[0]?.content?.parts?.[0]?.text;
+    console.log("Gemini raw response text:", responseText?.substring(0, 300));
 
     if (!responseText) {
-      console.error("Empty response from Gemini");
+      console.error("Empty response from Gemini. Full response:", JSON.stringify(response?.candidates?.[0]));
       return NextResponse.json(FALLBACK_RESPONSE);
     }
 
@@ -111,9 +117,16 @@ export async function POST(request: NextRequest) {
       urgency: ["low", "medium", "high", "critical"].includes(parsed.urgency) ? parsed.urgency : "low",
     };
 
+    console.log("OCR analysis complete. Score:", result.score, "Urgency:", result.urgency);
     return NextResponse.json(result);
-  } catch (error) {
-    console.error("OCR Flag API error:", error);
+  } catch (error: any) {
+    console.error("OCR Flag API error details:", {
+      message: error?.message,
+      status: error?.status,
+      statusCode: error?.statusCode,
+      errorDetails: error?.errorDetails,
+      stack: error?.stack?.substring(0, 500),
+    });
     return NextResponse.json(FALLBACK_RESPONSE);
   }
 }

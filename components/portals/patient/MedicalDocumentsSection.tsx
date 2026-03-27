@@ -144,7 +144,8 @@ export default function MedicalDocumentsSection({ userId }: MedicalDocumentsSect
           },
         });
 
-        const fileUrl = `https://ucarecdn.com/${uploaded.uuid}/`;
+        const fileUrl = `https://ucarecdn.com/${uploaded.uuid}/${encodeURIComponent(file.name)}`;
+        const resolvedMimeType = file.type || (file.name.endsWith(".pdf") ? "application/pdf" : "image/jpeg");
         setIsUploading(false);
         setIsAnalyzing(true);
 
@@ -152,7 +153,7 @@ export default function MedicalDocumentsSection({ userId }: MedicalDocumentsSect
         const ocrResponse = await fetch("/api/ocr-flag", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileUrl, mimeType: file.type }),
+          body: JSON.stringify({ fileUrl, mimeType: resolvedMimeType }),
         });
 
         const ocrResult: OcrResult = await ocrResponse.json();
