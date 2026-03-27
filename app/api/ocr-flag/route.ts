@@ -33,11 +33,12 @@ const FALLBACK_RESPONSE = {
 };
 
 // Model chain: best quality first → most available last
+// (gemini-1.5-x shut down Sep 29 2025 — do NOT add back)
 const MODEL_CHAIN = [
-  { model: "gemini-2.5-flash-preview-05-20", label: "2.5-flash" },
-  { model: "gemini-2.0-flash",               label: "2.0-flash" },
-  { model: "gemini-1.5-flash",               label: "1.5-flash" },
-  { model: "gemini-1.5-flash-8b",            label: "1.5-flash-8b" },
+  { model: "gemini-3-flash-preview",  label: "3-flash"        },
+  { model: "gemini-2.5-flash-lite",   label: "2.5-flash-lite" },
+  { model: "gemini-2.0-flash",        label: "2.0-flash"      },
+  { model: "gemini-2.0-flash-lite",   label: "2.0-flash-lite" },
 ];
 
 async function tryGeminiModel(
@@ -107,6 +108,12 @@ async function tryGeminiModel(
       message.includes("429") ||
       message.includes("RESOURCE_EXHAUSTED") ||
       message.includes("quota");
+    const isNotFound =
+      status === 404 ||
+      String(status) === "404" ||
+      message.includes("not found") ||
+      message.includes("is not found") ||
+      message.includes("not supported");
     const isUnavailable =
       status === 503 ||
       String(status) === "503" ||
@@ -115,6 +122,8 @@ async function tryGeminiModel(
 
     if (isQuota) {
       console.warn(`[${modelName}] ⚠ Quota exceeded — trying next model`);
+    } else if (isNotFound) {
+      console.warn(`[${modelName}] ⚠ Model not found — trying next model`);
     } else if (isUnavailable) {
       console.warn(`[${modelName}] ⚠ Model overloaded — trying next model`);
     } else {
