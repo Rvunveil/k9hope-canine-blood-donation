@@ -13,7 +13,7 @@ export interface ChatResponse {
 export const K9_BUDDY_KNOWLEDGE: ChatResponse[] = [
     {
         keywords: ["who", "developed", "created", "made", "built", "developer", "team", "author"],
-        response: "🎓 **K9Hope was developed by students from RIT Chennai - Department of Computer Science & Engineering:**\n\n**Student Developers:**\n- Vikram T (Reg: 4180)\n- Prem Kumar (Reg: 4305)\n- Ramkishore (Reg: 4126)\n\n**Faculty Mentor:**\n- Pandithurai O, CSE Department\n\n**Medical Partner:**\n- Madras Veterinary College (MVC), Vepery\n\nWe built this platform to save dogs' lives through technology! 🐕❤️",
+        response: "🎓 **K9Hope was developed by students from RIT Chennai - Department of Computer Science & Engineering:**\n\n**Student Developers:**\n- Vikram T (Reg: 4180)\n- Prem Kumar (Reg: 4305)\n- Ramkishore (Reg: 4126)\n\n**Faculty Mentor:**\n- Pandithurai O, CSE Department\n\n**Medical Partner:**\n- Madras Veterinary College (MVC), Vepery\n\n**Website:** [k9hope.in](https://k9hope.in)\n**GitHub:** [github.com/Rvunveil/k9hope-canine-blood-donation](https://github.com/Rvunveil/k9hope-canine-blood-donation)\n\nWe built this platform to save dogs' lives through technology! 🐕❤️",
         category: "about"
     },
 
