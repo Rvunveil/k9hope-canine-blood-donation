@@ -29,6 +29,64 @@ const uploadClient = new UploadClient({
   publicKey: process.env.NEXT_PUBLIC_UPLOADCARE_PUBLIC_KEY || "",
 });
 
+// ── Image Compression ─────────────────────────────────────────────
+// Compress images to max 1024×1024 at 0.82 JPEG quality before base64
+// Reduces token usage ~80%. PDFs skip compression.
+async function compressImage(file: File): Promise<{ base64: string; mimeType: string }> {
+  if (file.type === "application/pdf") {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        resolve({ base64: result.split(",")[1], mimeType: file.type });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const MAX_WIDTH = 1024;
+      const MAX_HEIGHT = 1024;
+      let { width, height } = img;
+
+      if (width > MAX_WIDTH || height > MAX_HEIGHT) {
+        const ratio = Math.min(MAX_WIDTH / width, MAX_HEIGHT / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return reject(new Error("Canvas not supported"));
+      ctx.drawImage(img, 0, 0, width, height);
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) return reject(new Error("Compression failed"));
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as string;
+            resolve({ base64: result.split(",")[1], mimeType: "image/jpeg" });
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        },
+        "image/jpeg",
+        0.82
+      );
+    };
+    img.onerror = reject;
+    img.src = objectUrl;
+  });
+}
+
 // ── Types ──────────────────────────────────────────────────────────
 interface OcrResult {
   score: number;
@@ -135,18 +193,9 @@ export default function MedicalDocumentsSection({ userId }: MedicalDocumentsSect
       setUploadProgress(0);
 
       try {
-        // Step 1: Read file as base64 IN THE BROWSER (avoids server-side fetch issues)
-        const base64Data = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => {
-            // reader.result is "data:image/jpeg;base64,XXXX..." — strip the prefix
-            const result = reader.result as string;
-            const base64 = result.split(",")[1];
-            resolve(base64);
-          };
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
+        // Step 1: Compress + read as base64 IN THE BROWSER
+        // Images are downscaled to 1024×1024 max before encoding (~80% token reduction)
+        const { base64: base64Data, mimeType: resolvedMimeType } = await compressImage(file);
 
         // Step 2: Upload to Uploadcare for permanent storage
         const uploaded = await uploadClient.uploadFile(file, {
@@ -158,7 +207,6 @@ export default function MedicalDocumentsSection({ userId }: MedicalDocumentsSect
         });
 
         const fileUrl = `https://ucarecdn.com/${uploaded.uuid}/${encodeURIComponent(file.name)}`;
-        const resolvedMimeType = file.type || (file.name.endsWith(".pdf") ? "application/pdf" : "image/jpeg");
         setIsUploading(false);
         setIsAnalyzing(true);
 

@@ -144,29 +144,41 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.error("GEMINI_API_KEY is not set");
+    // Build key pool — skip any empty/unset slots
+    function getApiKeys(): string[] {
+      return [
+        process.env.GEMINI_API_KEY,
+        process.env.GEMINI_API_KEY_2,
+        process.env.GEMINI_API_KEY_3,
+      ].filter((k): k is string => !!k && k.length > 0);
+    }
+
+    const apiKeys = getApiKeys();
+    if (apiKeys.length === 0) {
+      console.error("No GEMINI API keys set in environment");
       return NextResponse.json(FALLBACK_RESPONSE);
     }
 
-    console.log(`\n🔬 OCR request — mimeType: ${mimeType}, base64 length: ${base64Data.length}`);
+    console.log(`\n🔬 OCR request — mimeType: ${mimeType}, base64: ${base64Data.length} chars, keys: ${apiKeys.length}`);
 
-    // Try each model in the chain until one succeeds
+    // Nested loop: try every key with each model before moving to next model
     for (const { model, label } of MODEL_CHAIN) {
-      console.log(`  → Trying: ${label} (${model})`);
-      const result = await tryGeminiModel(apiKey, model, base64Data, mimeType);
-      if (result) {
-        console.log(`  ✓ Success with ${label} — Score: ${result.score}, Urgency: ${result.urgency}, Flags: [${result.flags.join(", ")}]`);
-        return NextResponse.json(result);
+      for (let keyIndex = 0; keyIndex < apiKeys.length; keyIndex++) {
+        console.log(`  → Trying: ${label} with key[${keyIndex + 1}]`);
+        const result = await tryGeminiModel(apiKeys[keyIndex], model, base64Data, mimeType);
+        if (result) {
+          console.log(`  ✓ Success — ${label} key[${keyIndex + 1}] Score: ${result.score} Urgency: ${result.urgency} Flags: [${result.flags.join(", ")}]`);
+          return NextResponse.json(result);
+        }
       }
     }
 
-    // All models failed
-    console.error("  ✗ All 4 models failed. Returning fallback.");
+    // All models × all keys exhausted
+    console.error(`  ✗ All ${MODEL_CHAIN.length} models × ${apiKeys.length} keys failed. Returning fallback.`);
     return NextResponse.json(FALLBACK_RESPONSE);
   } catch (error: any) {
     console.error("OCR route error:", error?.message);
     return NextResponse.json(FALLBACK_RESPONSE);
   }
 }
+
