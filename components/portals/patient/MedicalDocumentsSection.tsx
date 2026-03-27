@@ -135,7 +135,20 @@ export default function MedicalDocumentsSection({ userId }: MedicalDocumentsSect
       setUploadProgress(0);
 
       try {
-        // Step 1: Upload to Uploadcare
+        // Step 1: Read file as base64 IN THE BROWSER (avoids server-side fetch issues)
+        const base64Data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            // reader.result is "data:image/jpeg;base64,XXXX..." — strip the prefix
+            const result = reader.result as string;
+            const base64 = result.split(",")[1];
+            resolve(base64);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+        // Step 2: Upload to Uploadcare for permanent storage
         const uploaded = await uploadClient.uploadFile(file, {
           onProgress: (progress: any) => {
             if (progress.isComputable && progress.value !== undefined) {
@@ -149,20 +162,20 @@ export default function MedicalDocumentsSection({ userId }: MedicalDocumentsSect
         setIsUploading(false);
         setIsAnalyzing(true);
 
-        // Step 2: Call OCR API
+        // Step 3: Send base64 directly to OCR API — no server-side URL fetching
         const ocrResponse = await fetch("/api/ocr-flag", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileUrl, mimeType: resolvedMimeType }),
+          body: JSON.stringify({ base64Data, mimeType: resolvedMimeType }),
         });
 
         const ocrResult: OcrResult = await ocrResponse.json();
 
-        // Step 3: Save to Firestore
+        // Step 4: Save to Firestore
         const docData: PatientDocument = {
           fileName: file.name,
           fileUrl,
-          mimeType: file.type,
+          mimeType: resolvedMimeType,
           uploadedAt: new Date(),
           ocrScore: ocrResult.score,
           ocrFlags: ocrResult.flags,
@@ -172,7 +185,7 @@ export default function MedicalDocumentsSection({ userId }: MedicalDocumentsSect
 
         await savePatientDocument(userId, docData);
 
-        // Step 4: Update local state
+        // Step 5: Update local state
         setDocuments((prev) => [docData, ...prev]);
         setIsAnalyzing(false);
       } catch (err) {
