@@ -1,6 +1,6 @@
 // import Firestore & its functions
 import { db } from "@/firebaseConfig";
-import { doc, collection, addDoc, getDocs, getDoc, setDoc, updateDoc, query, where, deleteDoc, orderBy, limit } from "firebase/firestore";
+import { doc, collection, addDoc, getDocs, getDoc, setDoc, updateDoc, query, where, deleteDoc, orderBy, limit, arrayUnion } from "firebase/firestore";
 import { signInAnonymously, signOut } from "firebase/auth";
 import { auth } from "@/firebaseConfig";
 import { DonorData, PatientData, VeterinaryData, OrganisationData, UserData } from "@/types";
@@ -630,6 +630,69 @@ export async function getDonorAppointments(donorId: string) {
         }));
     } catch (error) {
         console.error("Error fetching appointments:", error);
+        return [];
+    }
+}
+
+// ==================== PATIENT DOCUMENT FUNCTIONS ====================
+
+// Save a patient document with OCR results to Firestore
+export async function savePatientDocument(userId: string, docData: {
+    fileName: string,
+    fileUrl: string,
+    mimeType: string,
+    uploadedAt: Date,
+    ocrScore: number,
+    ocrFlags: string[],
+    ocrSummary: string,
+    ocrUrgency: string
+}) {
+    try {
+        const patientDocRef = doc(db, "patients", userId);
+
+        // Push document into the documents array using arrayUnion
+        await updateDoc(patientDocRef, {
+            documents: arrayUnion(docData),
+            latestOcrScore: docData.ocrScore,
+            latestOcrUrgency: docData.ocrUrgency,
+            updatedAt: new Date()
+        });
+
+        console.log("Patient document saved successfully");
+        return { success: true };
+    } catch (error) {
+        console.error("Error saving patient document:", error);
+        // If the document doesn't exist yet or doesn't have the field, use setDoc with merge
+        try {
+            const patientDocRef = doc(db, "patients", userId);
+            await setDoc(patientDocRef, {
+                documents: [docData],
+                latestOcrScore: docData.ocrScore,
+                latestOcrUrgency: docData.ocrUrgency,
+                updatedAt: new Date()
+            }, { merge: true });
+            console.log("Patient document saved (with merge) successfully");
+            return { success: true };
+        } catch (mergeError) {
+            console.error("Error saving patient document (merge):", mergeError);
+            return { success: false };
+        }
+    }
+}
+
+// Get all documents for a patient from Firestore
+export async function getPatientDocuments(userId: string) {
+    try {
+        const patientDocRef = doc(db, "patients", userId);
+        const patientSnap = await getDoc(patientDocRef);
+
+        if (patientSnap.exists()) {
+            const data = patientSnap.data();
+            return data.documents || [];
+        }
+        return [];
+    } catch (error) {
+        console.error("Error fetching patient documents:", error);
         return [];
     }
 }

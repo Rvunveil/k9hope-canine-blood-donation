@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button"
 import { Activity, Thermometer, Heart, MapPin, Clock, AlertTriangle } from "lucide-react"
 
 import GreetingCard from "@/components/portals/common-parts/greeting-card"
+import MedicalDocumentsSection from "@/components/portals/patient/MedicalDocumentsSection"
 
 // User Imports
 import { useUser } from "@/context/UserContext";
@@ -342,6 +343,9 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Medical Documents & Case Severity */}
+      <MedicalDocumentsSection userId={userId} />
 
       {/* Chennai Veterinary Network Availability */}
       <div className="pb-6">
