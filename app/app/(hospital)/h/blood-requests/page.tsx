@@ -86,20 +86,20 @@ interface DonorMatch {
 
 // ── Urgency helpers ────────────────────────────────────────────────────────────
 const URGENCY_CONFIG: Record<string, { color: string; bg: string; border: string; label: string; icon: React.ReactNode }> = {
-  immediate:      { color: "text-red-700",    bg: "bg-red-50 dark:bg-red-950/20",    border: "border-red-500",   label: "🚨 IMMEDIATE",      icon: <Zap className="h-3 w-3" /> },
-  within_24_hours:{ color: "text-orange-700", bg: "bg-orange-50 dark:bg-orange-950/20", border: "border-orange-400", label: "⚡ Within 24 hrs",  icon: <AlertTriangle className="h-3 w-3" /> },
-  within_3_days:  { color: "text-yellow-700", bg: "bg-yellow-50 dark:bg-yellow-950/20", border: "border-yellow-400", label: "📅 Within 3 days", icon: <Clock className="h-3 w-3" /> },
-  no_rush:        { color: "text-green-700",  bg: "bg-green-50 dark:bg-green-950/20",  border: "border-green-400", label: "✓ No Rush",         icon: <Shield className="h-3 w-3" /> },
+  immediate: { color: "text-red-700", bg: "bg-red-50 dark:bg-red-950/20", border: "border-red-500", label: "🚨 IMMEDIATE", icon: <Zap className="h-3 w-3" /> },
+  within_24_hours: { color: "text-orange-700", bg: "bg-orange-50 dark:bg-orange-950/20", border: "border-orange-400", label: "⚡ Within 24 hrs", icon: <AlertTriangle className="h-3 w-3" /> },
+  within_3_days: { color: "text-yellow-700", bg: "bg-yellow-50 dark:bg-yellow-950/20", border: "border-yellow-400", label: "📅 Within 3 days", icon: <Clock className="h-3 w-3" /> },
+  no_rush: { color: "text-green-700", bg: "bg-green-50 dark:bg-green-950/20", border: "border-green-400", label: "✓ No Rush", icon: <Shield className="h-3 w-3" /> },
 };
 function getUrgencyConfig(urgency: string) {
   return URGENCY_CONFIG[urgency] || URGENCY_CONFIG["no_rush"];
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  pending:   { label: "Pending",   color: "bg-yellow-500" },
-  accepted:  { label: "Accepted",  color: "bg-blue-500" },
+  pending: { label: "Pending", color: "bg-yellow-500" },
+  accepted: { label: "Accepted", color: "bg-blue-500" },
   completed: { label: "Completed", color: "bg-green-600" },
-  rejected:  { label: "Rejected",  color: "bg-red-600" },
+  rejected: { label: "Rejected", color: "bg-red-600" },
 };
 
 // ── Match Score ────────────────────────────────────────────────────────────────
@@ -117,6 +117,8 @@ function calculateMatchScore(isEligible: boolean, isMedicallyFit: boolean, dista
 async function pushNotification(batch: ReturnType<typeof writeBatch>, payload: {
   userId: string; userRole: string; type: string; title: string; message: string; data: object;
 }) {
+  // We can't batch addDoc easily, so we use a pre-generated ref
+  // Caller must construct the ref externally — this is just a shape helper
   return {
     userId: payload.userId,
     userRole: payload.userRole,
@@ -171,21 +173,21 @@ export default function BloodRequestsPage() {
   const ITEMS_PER_PAGE = 6;
 
   // ── Derived lists ────────────────────────────────────────────────────────────
-  const urgentRequests   = allRequests.filter(r => (r.request_status === "pending" || r.request_status === "accepted") && (r.p_urgencyRequirment === "immediate" || r.p_urgencyRequirment === "within_24_hours"));
-  const regularRequests  = allRequests.filter(r => (r.request_status === "pending" || !r.request_status) && (r.p_urgencyRequirment === "within_3_days" || r.p_urgencyRequirment === "no_rush"));
+  const urgentRequests = allRequests.filter(r => (r.request_status === "pending" || r.request_status === "accepted") && (r.p_urgencyRequirment === "immediate" || r.p_urgencyRequirment === "within_24_hours"));
+  const regularRequests = allRequests.filter(r => (r.request_status === "pending" || !r.request_status) && (r.p_urgencyRequirment === "within_3_days" || r.p_urgencyRequirment === "no_rush"));
   const acceptedRequests = allRequests.filter(r => r.request_status === "accepted");
-  const completedRequests= allRequests.filter(r => r.request_status === "completed");
+  const completedRequests = allRequests.filter(r => r.request_status === "completed");
   const rejectedRequests = allRequests.filter(r => r.request_status === "rejected");
 
   function getTabList(): PatientRequest[] {
     let base: PatientRequest[];
     switch (activeTab) {
-      case "urgent":    base = urgentRequests; break;
-      case "regular":   base = regularRequests; break;
-      case "accepted":  base = acceptedRequests; break;
+      case "urgent": base = urgentRequests; break;
+      case "regular": base = regularRequests; break;
+      case "accepted": base = acceptedRequests; break;
       case "completed": base = completedRequests; break;
-      case "rejected":  base = rejectedRequests; break;
-      default:          base = [];
+      case "rejected": base = rejectedRequests; break;
+      default: base = [];
     }
     if (!searchQuery.trim()) return base;
     const q = searchQuery.toLowerCase();
@@ -218,6 +220,7 @@ export default function BloodRequestsPage() {
           ...(d.data() as Omit<PatientRequest, "id">),
           request_status: d.data().request_status || "pending",
         }));
+        // Sort: immediate first, then by createdAt desc
         requests.sort((a, b) => {
           const urgencyOrder = ["immediate", "within_24_hours", "within_3_days", "no_rush"];
           const ai = urgencyOrder.indexOf(a.p_urgencyRequirment);
@@ -242,6 +245,7 @@ export default function BloodRequestsPage() {
   // ── Manual refresh ─────────────────────────────────────────────────────────
   function handleRefresh() {
     setRefreshing(true);
+    // onSnapshot is live — just trigger a visual refresh
     setTimeout(() => setRefreshing(false), 800);
   }
 
@@ -254,6 +258,7 @@ export default function BloodRequestsPage() {
 
     try {
       const donorsRef = collection(db, "donors");
+      // Fetch same blood type donors; also fetch universal if not universal
       const queries: Promise<any>[] = [
         getDocs(query(donorsRef, where("d_bloodgroup", "==", requestData.p_bloodgroup))),
       ];
@@ -277,6 +282,7 @@ export default function BloodRequestsPage() {
           const isSameCity = d.d_city?.toLowerCase() === requestData.p_city?.toLowerCase();
           const distance = isSameCity ? 0 : 1;
 
+          // Check existing links for this patient
           const existingQ = query(
             collection(db, "donor-appointments"),
             where("linkedPatientId", "==", requestData.id),
@@ -325,7 +331,7 @@ export default function BloodRequestsPage() {
       const q = donorSearchQuery.toLowerCase();
       filtered = filtered.filter(d => d.name.toLowerCase().includes(q) || d.city.toLowerCase().includes(q) || d.phone.includes(q));
     }
-    if (sortBy === "distance")   filtered.sort((a, b) => a.distance - b.distance || b.matchScore - a.matchScore);
+    if (sortBy === "distance") filtered.sort((a, b) => a.distance - b.distance || b.matchScore - a.matchScore);
     if (sortBy === "matchScore") filtered.sort((a, b) => b.matchScore - a.matchScore);
     if (sortBy === "experience") filtered.sort((a, b) => b.donationCount - a.donationCount);
     setFilteredDonors(filtered);
@@ -344,6 +350,7 @@ export default function BloodRequestsPage() {
       const batch = writeBatch(db);
       const isUrgent = requestData.p_urgencyRequirment === "immediate" || requestData.p_urgencyRequirment === "within_24_hours";
 
+      // 1. Create donor-appointment record
       const appointmentRef = doc(collection(db, "donor-appointments"));
       batch.set(appointmentRef, {
         requestId: requestData.id,
@@ -368,6 +375,7 @@ export default function BloodRequestsPage() {
         createdBy: "admin",
       });
 
+      // 2. Donor notification
       const donorNotifRef = doc(collection(db, "notifications"));
       batch.set(donorNotifRef, {
         userId: donor.id,
@@ -380,6 +388,7 @@ export default function BloodRequestsPage() {
         createdAt: Timestamp.now(),
       });
 
+      // 3. Patient notification
       const patientNotifRef = doc(collection(db, "notifications"));
       batch.set(patientNotifRef, {
         userId: requestData.id,
@@ -392,6 +401,7 @@ export default function BloodRequestsPage() {
         createdAt: Timestamp.now(),
       });
 
+      // 4. Update patient record
       const patientRef = doc(db, "patients", requestData.id);
       batch.update(patientRef, {
         pendingMatches: increment(1),
@@ -408,6 +418,7 @@ export default function BloodRequestsPage() {
         description: `${donor.name} linked to ${requestData.p_name}. Notifications sent to both.`,
       });
 
+      // Refresh donor availability
       fetchAvailableDonors(requestData);
 
     } catch (error: any) {
@@ -487,6 +498,7 @@ export default function BloodRequestsPage() {
         updatedAt: Timestamp.now(),
       });
 
+      // Update all pending donor-appointments for this patient to "completed"
       const apptQ = query(
         collection(db, "donor-appointments"),
         where("linkedPatientId", "==", patient.id),
@@ -497,6 +509,7 @@ export default function BloodRequestsPage() {
         batch.update(apptDoc.ref, { status: "completed", completedAt: Timestamp.now() });
       });
 
+      // Patient completion notification
       const notifRef = doc(collection(db, "notifications"));
       batch.set(notifRef, {
         userId: patient.id,
@@ -620,7 +633,7 @@ export default function BloodRequestsPage() {
           </TabsTrigger>
         </TabsList>
 
-        {(["urgent","regular","accepted","completed","rejected"] as const).map(tab => (
+        {(["urgent", "regular", "accepted", "completed", "rejected"] as const).map(tab => (
           <TabsContent key={tab} value={tab}>
             {pageData.length === 0 ? (
               <Card className="border-dashed">
@@ -666,7 +679,7 @@ export default function BloodRequestsPage() {
               Match Donors — {selectedRequest?.p_name}
             </DialogTitle>
             <DialogDescription>
-              Blood type: <strong>{selectedRequest?.p_bloodgroup}</strong> · Qty: {selectedRequest?.p_quantityRequirment} units · Urgency: {selectedRequest?.p_urgencyRequirment?.replace("_"," ")}
+              Blood type: <strong>{selectedRequest?.p_bloodgroup}</strong> · Qty: {selectedRequest?.p_quantityRequirment} units · Urgency: {selectedRequest?.p_urgencyRequirment?.replace("_", " ")}
             </DialogDescription>
           </DialogHeader>
 
@@ -755,7 +768,7 @@ export default function BloodRequestsPage() {
           <DialogHeader>
             <DialogTitle>Mark Transfusion Complete</DialogTitle>
             <DialogDescription>
-              Confirm that {completeTarget?.p_name}&apos;s blood transfusion has been completed.
+              Confirm that {completeTarget?.p_name}'s blood transfusion has been completed.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -893,6 +906,7 @@ function RequestCard({
       </CardContent>
 
       <CardFooter className="flex flex-col gap-2 pt-0">
+        {/* Primary Action: Find Donors (only for active) */}
         {isActive && (
           <Button className="w-full bg-blue-600 hover:bg-blue-700 h-9 text-sm" onClick={() => onFindDonors(request)}>
             <Users className="h-4 w-4 mr-2" />
@@ -901,6 +915,7 @@ function RequestCard({
           </Button>
         )}
 
+        {/* Schedule manually */}
         {isActive && (
           <div className="w-full space-y-1.5">
             <Popover open={showDatePicker} onOpenChange={setShowDatePicker}>
@@ -929,18 +944,21 @@ function RequestCard({
           </div>
         )}
 
+        {/* Mark complete (accepted) */}
         {request.request_status === "accepted" && (
           <Button className="w-full bg-green-700 hover:bg-green-800 h-8 text-xs" onClick={() => onMarkComplete(request)}>
             <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" /> Mark Transfusion Complete
           </Button>
         )}
 
+        {/* Reopen (rejected / completed) */}
         {(isCompleted || isRejected) && (
           <Button variant="outline" className="w-full h-8 text-xs" onClick={() => onReopen(request.id)}>
             <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Reopen Request
           </Button>
         )}
 
+        {/* Secondary actions row */}
         <div className="flex gap-1.5 w-full">
           <Button variant="ghost" size="sm" className="flex-1 h-7 text-xs" onClick={() => onViewDetail(request)}>
             <Eye className="h-3.5 w-3.5 mr-1" /> Details
@@ -1048,7 +1066,7 @@ function PatientDetailView({ patient }: { patient: PatientRequest }) {
         <div><p className="text-xs text-gray-500">Reason</p><p className="font-semibold">{patient.p_reasonRequirment}</p></div>
         <div><p className="text-xs text-gray-500">Quantity</p><p className="font-semibold">{patient.p_quantityRequirment} unit(s)</p></div>
         <div><p className="text-xs text-gray-500">City</p><p className="font-semibold">{patient.p_city}</p></div>
-        <div><p className="text-xs text-gray-500">Urgency</p><p className="font-semibold capitalize">{patient.p_urgencyRequirment?.replace(/_/g," ")}</p></div>
+        <div><p className="text-xs text-gray-500">Urgency</p><p className="font-semibold capitalize">{patient.p_urgencyRequirment?.replace(/_/g, " ")}</p></div>
         <div><p className="text-xs text-gray-500">Owner Phone</p><a href={`tel:${patient.phone}`} className="font-semibold text-blue-600 hover:underline">{patient.phone}</a></div>
         <div><p className="text-xs text-gray-500">Owner Email</p><p className="font-semibold">{patient.email || "—"}</p></div>
         <div><p className="text-xs text-gray-500">Emergency Contact</p><p className="font-semibold">{patient.emergency_contact_name}</p></div>
@@ -1069,7 +1087,7 @@ function PatientDetailView({ patient }: { patient: PatientRequest }) {
           <img src={patient.initialDocument.fileUrl} alt="Medical report" className="w-full max-h-48 object-contain bg-white" onError={e => { (e.target as HTMLImageElement).parentElement!.style.display = "none"; }} />
           {patient.initialDocument.ocrSummary && (
             <div className="p-3 bg-gray-50 dark:bg-gray-800 text-xs text-gray-600 italic">
-              AI Summary: &quot;{patient.initialDocument.ocrSummary}&quot;
+              AI Summary: "{patient.initialDocument.ocrSummary}"
             </div>
           )}
         </div>
