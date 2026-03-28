@@ -75,6 +75,7 @@
     "crypto-js": "^4.2.0",
     "date-fns": "^3.6.0",
     "fast-fuzzy": "^1.12.0",
+    "firebase-admin": "^13.7.0",
     "framer-motion": "^12.4.10",
     "fs": "^0.0.1-security",
     "fs.promises": "^0.1.2",

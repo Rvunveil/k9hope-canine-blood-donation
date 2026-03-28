@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 
 import GreetingCard from "@/components/portals/common-parts/greeting-card"
 import PatientTriageCarousel from "@/components/portals/hospital/PatientTriageCarousel";
+import ZICPStockAdvisor from "@/components/portals/hospital/ZICPStockAdvisor";
 
 // User Imports
 import { useUser } from "@/context/UserContext";
@@ -368,6 +369,11 @@ export default function DashboardPage() {
           </Card>
         </div>
       </section>
+
+      {/* ── ZICP Stock Advisor — research-grade demand forecasting ── */}
+      {userId && (
+        <ZICPStockAdvisor clinicId={userId} />
+      )}
 
     </ContentLayout>
   );
