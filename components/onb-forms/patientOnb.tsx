@@ -65,7 +65,7 @@ import { CalendarFull } from "@/components/ui/calendar-full";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { CalendarIcon } from "lucide-react";
 import { UploadClient } from "@uploadcare/upload-client";
-const client = new UploadClient({ publicKey: process.env.NEXT_PUBLIC_UPLOADCARE_PUB_KEY });
+const client = new UploadClient({ publicKey: process.env.NEXT_PUBLIC_UPLOADCARE_PUBLIC_KEY });
 
 
 const dobSchema = z
@@ -275,7 +275,7 @@ export default function OnboardingPat() {
         setDocUploading(true);
         try {
             const { base64, mimeType } = await compressImageOnb(file);
-            const uploadClient = new UploadClient({ publicKey: process.env.NEXT_PUBLIC_UPLOADCARE_PUB_KEY || "" });
+            const uploadClient = new UploadClient({ publicKey: process.env.NEXT_PUBLIC_UPLOADCARE_PUBLIC_KEY || "" });
             const uploaded = await uploadClient.uploadFile(file);
             const fileUrl = `https://ucarecdn.com/${uploaded.uuid}/${encodeURIComponent(file.name)}`;
             setDocUploading(false);

@@ -13,6 +13,7 @@ import { useStore } from "@/hooks/use-store";
 import { Badge } from "@/components/ui/badge";
 
 import GreetingCard from "@/components/portals/common-parts/greeting-card"
+import PatientTriageCarousel from "@/components/portals/hospital/PatientTriageCarousel";
 
 // User Imports
 import { useUser } from "@/context/UserContext";
@@ -189,6 +190,11 @@ export default function DashboardPage() {
           role="veterinary"
         />
       </div>
+
+      {/* ── Canine Triage Queue — Clinic-Only AI Patient Carousel ── */}
+      <section className="mt-6 mb-2">
+        <PatientTriageCarousel />
+      </section>
 
       {/* Analytics Overview Section */}
       <section className="space-y-6 mt-8">
