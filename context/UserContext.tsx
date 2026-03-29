@@ -36,11 +36,7 @@ export function decryptData(ciphertext: string) {
 // Function to Store Encrypted Cookie
 export function setEncryptedCookie(name: string, value: string, days: number) {
   const encryptedValue = encryptData(value);
-  Cookies.set(name, encryptedValue, {
-    expires: days,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
-  });
+  Cookies.set(name, encryptedValue, { expires: days });
 }
 
 // Function to Retrieve and Decrypt Cookie
