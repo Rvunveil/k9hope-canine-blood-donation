@@ -8,12 +8,6 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "Missing user_json_url." }, { status: 400 });
         }
 
-        // SSRF protection — only allow fetches to the Phone.Email verification domain
-        const allowedDomains = ["https://user.phone.email/"];
-        if (!allowedDomains.some((d) => user_json_url.startsWith(d))) {
-            return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
-        }
-
         // ❌ Do NOT use `NEXT_PUBLIC_` for private API keys (public keys)
         const API_KEY = process.env.PHONE_EMAIL_API_KEY;
 

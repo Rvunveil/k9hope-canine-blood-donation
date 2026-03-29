@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzxm5TmObKpnsht5_AtI4D-9gBbLUahnbiFGHxXjTM-xIRlNeKihnwbFoCHxyiz9rPI/exec"; // your script URL
+
 export async function POST(req: NextRequest) {
   try {
     const { role, loginid, title, message } = await req.json();
@@ -8,12 +10,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    const SCRIPT_URL = process.env.GOOGLE_APPS_SCRIPT_URL;
-    if (!SCRIPT_URL) {
-      return NextResponse.json({ error: "Service unavailable" }, { status: 503 });
-    }
-
-    const res = await fetch(SCRIPT_URL, {
+    const res = await fetch(GOOGLE_SCRIPT_URL, {
       method: "POST",
       body: JSON.stringify({ role, loginid, title, message }),
       headers: {
