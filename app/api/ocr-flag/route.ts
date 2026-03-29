@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 const VETERINARY_TRIAGE_PROMPT = `You are a veterinary emergency triage assistant for K9Hope, a canine blood donation network in India.
 Analyze this uploaded document which may be a vet recommendation letter, blood test report, or medical document for a dog.
@@ -135,6 +136,12 @@ async function tryGeminiModel(
 
 export async function POST(request: NextRequest) {
   try {
+    // Rate limiting — 5 OCR requests per minute per IP (image processing is expensive)
+    const ip = request.headers.get("x-forwarded-for") ?? "unknown";
+    if (!checkRateLimit(ip, 5)) {
+      return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+    }
+
     const { base64Data, mimeType } = await request.json();
 
     if (!base64Data || !mimeType) {

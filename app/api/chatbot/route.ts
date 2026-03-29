@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { fuzzy } from "fast-fuzzy";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-
-console.log("CRITICAL: API KEY STATUS:", !!process.env.GEMINI_API_KEY);
-console.log("DEBUG: Module Level Key Prefix:", process.env.GEMINI_API_KEY?.substring(0, 4));
+import { checkRateLimit } from "@/lib/rate-limit";
 
 const SYSTEM_PROMPT = `You are K9 Buddy AI, a Clinical Protocol Guardian for K9Hope Chennai Network.
 
@@ -66,8 +64,12 @@ RESPONSE GUIDELINES:
  */
 async function loadSheetData(): Promise<{ [key: string]: string }> {
   try {
-    const SHEET_ID = "1oqQDe7LU4FVpWzUEC9txHFAl7Dz6b-IkH3xwEEd8Jl4"; // Your Google Sheet ID
-    const GID = "1846653281"; // Your Sheet's GID
+    const SHEET_ID = process.env.GOOGLE_SHEET_ID;
+    if (!SHEET_ID) {
+      console.error("GOOGLE_SHEET_ID env var is not set — skipping sheet load");
+      return {};
+    }
+    const GID = "1846653281"; // Sheet tab GID — not sensitive, kept as constant
     const TSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=tsv&gid=${GID}`;
 
     const response = await fetch(TSV_URL);
@@ -171,6 +173,12 @@ async function getGeminiResponse(model: ReturnType<GoogleGenerativeAI["getGenera
  */
 export async function POST(req: NextRequest) {
   try {
+    // Rate limiting — 10 requests per minute per IP
+    const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+    if (!checkRateLimit(ip)) {
+      return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+    }
+
     const { message } = await req.json();
     if (!message) {
       return NextResponse.json({ error: "No message provided" }, { status: 400 });
@@ -186,8 +194,6 @@ export async function POST(req: NextRequest) {
 
     // Check API key availability (case-sensitive)
     const apiKey = process.env.GEMINI_API_KEY;
-    console.log("CRITICAL: API KEY STATUS:", !!apiKey);
-    
     if (!apiKey) {
       return NextResponse.json(
         { error: "Clinical Assistant is offline. Please check RIT server configuration." },
