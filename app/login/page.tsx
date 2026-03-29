@@ -26,6 +26,7 @@ import { useRouter } from "next/navigation";
 import { loginUserDatabase, updateUserData } from "@/firebaseFunctions";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/firebaseConfig";
+import { signInWithFirebaseCustomToken } from "@/lib/firebaseAuthHelpers";
 
 // Helper function to generate random userId (same as in firebaseFunctions.ts)
 function generateUserId(): string {
@@ -135,6 +136,14 @@ const PatientContent: React.FC = () => {
         console.log("Backend returned null, using temporary ID:", finalUserId);
       }
 
+      // Sign into Firebase Auth so request.auth.uid === finalUserId for Firestore rules
+      try {
+        await signInWithFirebaseCustomToken(finalUserId);
+      } catch (authErr) {
+        // Auth token failed — log but do NOT block login. Cookie session still works.
+        console.error("[Firebase Auth] Custom token sign-in failed (patient):", authErr);
+      }
+
       const userStatus = await getOnboardedStatus(finalUserId, "patient");
       console.log("getOnboardedStatus returned:", userStatus);
 
@@ -234,6 +243,14 @@ const DonorContent: React.FC = () => {
         console.log("Backend returned null, using temporary ID:", finalUserId);
       }
 
+      // Sign into Firebase Auth so request.auth.uid === finalUserId for Firestore rules
+      try {
+        await signInWithFirebaseCustomToken(finalUserId);
+      } catch (authErr) {
+        // Auth token failed — log but do NOT block login. Cookie session still works.
+        console.error("[Firebase Auth] Custom token sign-in failed (donor):", authErr);
+      }
+
       const userStatus = await getOnboardedStatus(finalUserId, "donor");
       console.log("getOnboardedStatus returned:", userStatus);
 
@@ -329,6 +346,14 @@ const VeterinaryContent: React.FC = () => {
         console.log("Backend returned null, using temporary ID:", finalUserId);
       }
 
+      // Sign into Firebase Auth so request.auth.uid === finalUserId for Firestore rules
+      try {
+        await signInWithFirebaseCustomToken(finalUserId);
+      } catch (authErr) {
+        // Auth token failed — log but do NOT block login. Cookie session still works.
+        console.error("[Firebase Auth] Custom token sign-in failed (veterinary):", authErr);
+      }
+
       const userStatus = await getOnboardedStatus(finalUserId, "veterinary");
       console.log("getOnboardedStatus returned:", userStatus);
 
@@ -422,6 +447,14 @@ const OrganisationContent: React.FC = () => {
       const finalUserId = userId || generateUserId();
       if (!userId) {
         console.log("Backend returned null, using temporary ID:", finalUserId);
+      }
+
+      // Sign into Firebase Auth so request.auth.uid === finalUserId for Firestore rules
+      try {
+        await signInWithFirebaseCustomToken(finalUserId);
+      } catch (authErr) {
+        // Auth token failed — log but do NOT block login. Cookie session still works.
+        console.error("[Firebase Auth] Custom token sign-in failed (organisation):", authErr);
       }
 
       const userStatus = await getOnboardedStatus(finalUserId, "organisation");

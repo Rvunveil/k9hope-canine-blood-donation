@@ -74,7 +74,7 @@ export const metadata: Metadata = {
     siteName: 'K9Hope',
     images: [
       {
-        url: '/og-image.png',
+        url: '/api/og',
         width: 1200,
         height: 630,
         alt: 'K9Hope — India\'s Canine Blood Donation & Management Platform',
@@ -91,7 +91,7 @@ export const metadata: Metadata = {
     description:
       'India\'s first open-source AI canine blood donation platform. DEA blood type matching, ' +
       '12-min response. Chennai & Tamil Nadu. Built by RIT Chennai × Madras Veterinary College.',
-    images: ['/og-image.png'],
+    images: ['/api/og'],
     creator: '@k9hope',
     site: '@k9hope',
   },

@@ -1,123 +1,422 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper functions for data validation
+
+    // ══════════════════════════════════════════════════════════════
+    // K9Hope — Production Firestore Security Rules
+    // Last updated: 2026-03-29 (Security Audit Fix)
+    // Firebase project: k9hope-fc030
+    //
+    // IMPORTANT PREREQUISITE:
+    // These rules REQUIRE Firebase Authentication to be active.
+    // The client app MUST sign users in via Firebase Auth so that
+    // request.auth.uid is populated on every request.
+    //
+    // The app currently uses custom userId strings as document IDs.
+    // After enabling Firebase Auth, during onboarding the app must
+    // store the Firebase Auth UID in each user's document so that
+    // the helper functions below can look up the user's role.
+    //
+    // Migration path:
+    //   1. Enable Firebase Auth (phone / email provider)
+    //   2. On login, set the user doc's "authUid" field to
+    //      request.auth.uid (the Firebase Auth UID)
+    //   3. The rules below use request.auth.uid to look up the
+    //      user's role from the users collection, matching on
+    //      the document whose "authUid" field equals request.auth.uid.
+    //
+    // UNTIL Firebase Auth is wired up, these rules will DENY all
+    // access (because request.auth will be null). This is intentional
+    // — "deny by default" is safer than "allow all."
+    // ══════════════════════════════════════════════════════════════
+
+    // ── Helper Functions ──────────────────────────────────────────
+
+    // True if the request comes from a signed-in Firebase Auth user
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // True if the signed-in user's Auth UID matches the given uid
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Look up the user's role from the /users collection.
+    // Requires that the document at /users/{request.auth.uid}
+    // contains a "role" field.
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isHospital() {
+      return isSignedIn() && getUserRole() == 'veterinary';
+    }
+
+    function isDonor() {
+      return isSignedIn() && getUserRole() == 'donor';
+    }
+
+    function isPatient() {
+      return isSignedIn() && getUserRole() == 'patient';
+    }
+
+    function isOrg() {
+      return isSignedIn() && getUserRole() == 'organisation';
+    }
+
+    // ── Data validation helpers (preserved from original rules) ───
+
     function isValidCanineBloodType(bloodType) {
       return bloodType in [
-        "dea1.1", 
-        "dea1.2", 
-        "dea3", 
-        "dea4", 
-        "dea5", 
-        "dea7", 
-        "universal", 
-        "unknown"
+        "dea1.1", "dea1.2", "dea3", "dea4",
+        "dea5", "dea7", "universal", "unknown",
+        "DEA 1.1+", "DEA 1.1-", "DEA 1.2", "DEA 3",
+        "DEA 4", "DEA 5", "DEA 7", "Universal"
       ];
     }
-    
-    function isValidDogAge(age) {
-      return age >= 1 && age <= 8;
-    }
-    
-    function isValidDogWeight(weight) {
-      return weight >= 20;
-    }
-    
+
     function isValidEmail(email) {
       return email.matches('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$');
     }
-    
+
     function isValidPhone(phone) {
       return phone.matches('^[+]?[0-9]{10,15}$');
     }
 
-    // Users collection - central user management
+
+    // ══════════════════════════════════════════════════════════════
+    // 1. USERS COLLECTION — Central user management
+    // ══════════════════════════════════════════════════════════════
     match /users/{userId} {
-      // Temporarily allow all access for development
-      allow read, write, create, list: if true;
-      
-      // Production rules (commented out for now)
-      // allow read, write: if request.auth != null && request.auth.uid == userId;
-      // allow create: if request.auth != null 
-      //   && request.auth.uid == userId
-      //   && resource.data.role in ["patient", "donor", "veterinary", "organisation"]
-      //   && resource.data.onboarded in ["yes", "no"];
-      // // Allow read access for login process (query by phone/email)
-      // allow list: if request.auth != null;
+      // Create: signed-in user can only create their own doc
+      allow create: if isOwner(userId);
+
+      // Read: user can read own doc; hospital staff can read any
+      //        user doc (needed for patient/donor lookup)
+      allow read: if isOwner(userId) || isHospital();
+
+      // Update: user can only update their own doc
+      allow update: if isOwner(userId);
+
+      // Delete: user can only delete their own doc
+      allow delete: if isOwner(userId);
+
+      // List: hospital staff can list users (for phone/email lookup)
+      allow list: if isHospital();
     }
 
-    // Canines collection (formerly donors)
+
+    // ══════════════════════════════════════════════════════════════
+    // 2. DONORS COLLECTION — Donor dog owner profiles
+    //    (doc ID = userId; this is the active collection)
+    // ══════════════════════════════════════════════════════════════
+    match /donors/{donorId} {
+      // Create: only donors can create their own profile
+      allow create: if isDonor() && isOwner(donorId);
+
+      // Read: the donor themselves, or hospital staff
+      //        (hospitals need to read donor profiles for matching)
+      allow read: if isOwner(donorId) || isHospital();
+
+      // Update: donor can update own profile; hospitals can update
+      //          (e.g., to record donation count, last donation)
+      allow update: if isOwner(donorId) || isHospital();
+
+      // Delete: only the donor can delete their own profile
+      allow delete: if isOwner(donorId);
+    }
+
+
+    // ══════════════════════════════════════════════════════════════
+    // 3. CANINES COLLECTION — Legacy donor dog medical records
+    //    (may still have data; same rules as donors for safety)
+    // ══════════════════════════════════════════════════════════════
     match /canines/{canineId} {
-      allow read, write: if true;
-      allow create: if true 
-        && isValidEmail(resource.data.email)
-        && isValidPhone(resource.data.phone)
-        && isValidCanineBloodType(resource.data.d_bloodgroup)
-        && resource.data.d_name is string
-        && resource.data.d_name.size() > 0
-        && resource.data.d_gender in ["male", "female"]
-        && isValidDogWeight(resource.data.d_weight_kg);
+      allow create: if isDonor();
+      allow read: if isSignedIn() && (isOwner(canineId) || isHospital());
+      allow update: if isOwner(canineId) || isHospital();
+      allow delete: if isOwner(canineId);
     }
 
-    // Patients collection rules  
+
+    // ══════════════════════════════════════════════════════════════
+    // 4. PATIENTS COLLECTION — Patient dog profiles + medical docs
+    //    (doc ID = userId)
+    // ══════════════════════════════════════════════════════════════
     match /patients/{patientId} {
-      allow read, write: if true;
-      allow create: if true
-        && isValidEmail(resource.data.email)
-        && isValidPhone(resource.data.phone)
-        && isValidCanineBloodType(resource.data.p_bloodgroup)
-        && resource.data.p_name is string
-        && resource.data.p_name.size() > 0;
+      // Create: any signed-in user can create (patients register here)
+      allow create: if isSignedIn();
+
+      // Read: the patient themselves, or hospital staff
+      //        (hospitals need to read patient profiles for triage)
+      allow read: if isOwner(patientId) || isHospital();
+
+      // Update: patient can update own profile; hospitals can update
+      //          (to set request_status, assigned_clinic_id, etc.)
+      allow update: if isOwner(patientId) || isHospital();
+
+      // Delete: only the patient can delete their own profile
+      allow delete: if isOwner(patientId);
     }
 
-    // Clinics collection (formerly hospitals/veterinaries)
+
+    // ══════════════════════════════════════════════════════════════
+    // 5. CLINICS COLLECTION — Clinic/hospital profiles
+    //    (doc ID = vet's userId)
+    // ══════════════════════════════════════════════════════════════
     match /clinics/{clinicId} {
-      allow read, write: if true;
-      allow create: if true
-        && isValidEmail(resource.data.email)
-        && resource.data.h_name is string
-        && resource.data.h_name.size() > 0
-        && resource.data.h_phone is string
-        && resource.data.h_phone.size() > 0;
+      // Create: only hospital/vet staff can create
+      allow create: if isHospital() && isOwner(clinicId);
+
+      // Read: any signed-in user (patients/donors browse clinics)
+      allow read: if isSignedIn();
+
+      // Update: only the owning clinic can update its own profile
+      allow update: if isHospital() && isOwner(clinicId);
+
+      // Delete: only the owning clinic can delete
+      allow delete: if isHospital() && isOwner(clinicId);
     }
 
-    // Organisations collection rules
-    match /organisations/{organisationId} {
-      allow read, write: if true;
-      allow create: if true
-        && isValidEmail(resource.data.email)
-        && resource.data.o_name is string
-        && resource.data.o_name.size() > 0;
+
+    // ══════════════════════════════════════════════════════════════
+    // 6. VETERINARIES COLLECTION — Detailed vet/hospital data
+    //    (doc ID = vet's userId; used by hospitalOnb.tsx)
+    // ══════════════════════════════════════════════════════════════
+    match /veterinaries/{vetId} {
+      allow create: if isHospital() && isOwner(vetId);
+      allow read: if isSignedIn();
+      allow update: if isHospital() && isOwner(vetId);
+      allow delete: if isHospital() && isOwner(vetId);
     }
 
-    // Blood requests collection rules
+
+    // ══════════════════════════════════════════════════════════════
+    // 7. ORGANISATIONS COLLECTION — NGO/animal welfare org profiles
+    //    (doc ID = org's userId)
+    // ══════════════════════════════════════════════════════════════
+    match /organisations/{orgId} {
+      // Create: only organisation users
+      allow create: if isOrg() && isOwner(orgId);
+
+      // Read: any signed-in user
+      allow read: if isSignedIn();
+
+      // Update: only the owning organisation
+      allow update: if isOrg() && isOwner(orgId);
+
+      // Delete: only the owning organisation
+      allow delete: if isOrg() && isOwner(orgId);
+    }
+
+
+    // ══════════════════════════════════════════════════════════════
+    // 8. BLOOD REQUESTS COLLECTION — Emergency blood requests
+    //    (from original rules; uses requester_id field)
+    // ══════════════════════════════════════════════════════════════
     match /bloodRequests/{requestId} {
-      allow read, write: if true;
-      allow create: if true
-        && isValidCanineBloodType(resource.data.required_blood_type)
-        && resource.data.requester_id is string
-        && resource.data.requester_id.size() > 0
-        && resource.data.urgency in ["low", "medium", "high", "critical"]
-        && resource.data.quantity is number
-        && resource.data.quantity > 0;
+      // Create: patients and hospitals can create requests
+      allow create: if isPatient() || isHospital();
+
+      // Read: hospitals can read all; patients can read their own
+      allow read: if isHospital()
+                  || (isPatient() && resource.data.requester_id == request.auth.uid);
+
+      // Update: hospitals only (update status, assign donors)
+      allow update: if isHospital();
+
+      // Delete: hospitals only
+      allow delete: if isHospital();
     }
 
-    // Donation records collection rules
+
+    // ══════════════════════════════════════════════════════════════
+    // 9. BLOOD_REQUESTS COLLECTION — Patient-side request tracking
+    //    (uses userId field for ownership)
+    // ══════════════════════════════════════════════════════════════
+    match /blood_requests/{requestId} {
+      allow create: if isPatient() || isHospital();
+      allow read: if isHospital()
+                  || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow update: if isHospital();
+      allow delete: if isHospital();
+    }
+
+
+    // ══════════════════════════════════════════════════════════════
+    // 10. DONATION RECORDS COLLECTION — Donation history
+    //     (from original rules; uses donor_id field)
+    // ══════════════════════════════════════════════════════════════
     match /donationRecords/{recordId} {
-      allow read, write: if true;
-      allow create: if true
-        && resource.data.donor_id is string
-        && resource.data.donor_id.size() > 0
-        && resource.data.recipient_id is string
-        && resource.data.recipient_id.size() > 0
-        && resource.data.donation_date is timestamp
-        && resource.data.blood_type is string
-        && isValidCanineBloodType(resource.data.blood_type)
-        && resource.data.volume_ml is number
-        && resource.data.volume_ml > 0;
+      // Create: hospitals only (they record the donation)
+      allow create: if isHospital();
+
+      // Read: the donor whose dog donated, or hospital staff
+      allow read: if isHospital()
+                  || (isDonor() && resource.data.donor_id == request.auth.uid);
+
+      // Update: hospitals only
+      allow update: if isHospital();
+
+      // Delete: hospitals only
+      allow delete: if isHospital();
     }
 
-    // Deny all other reads/writes
+
+    // ══════════════════════════════════════════════════════════════
+    // 11. DONATIONS COLLECTION — Alternative donation records
+    //     (used by firebaseFunctions.ts getDonorHistory/getDonorStats)
+    // ══════════════════════════════════════════════════════════════
+    match /donations/{donationId} {
+      allow create: if isHospital();
+      allow read: if isHospital()
+                  || (isDonor() && resource.data.donorId == request.auth.uid);
+      allow update: if isHospital();
+      allow delete: if isHospital();
+    }
+
+
+    // ══════════════════════════════════════════════════════════════
+    // 12. VETERINARY-DONOR-REQUESTS — Clinic's donor request queue
+    //     (created by patients and hospitals; clinicId links to vet)
+    // ══════════════════════════════════════════════════════════════
+    match /veterinary-donor-requests/{requestId} {
+      allow create: if isPatient() || isHospital();
+      allow read: if isHospital()
+                  || (isPatient() && resource.data.linkedPatientId == request.auth.uid);
+      allow update: if isHospital();
+      allow delete: if isHospital();
+    }
+
+
+    // ══════════════════════════════════════════════════════════════
+    // 13. DONOR-APPOINTMENTS — Appointment records linking
+    //     donors to patients via a clinic
+    // ══════════════════════════════════════════════════════════════
+    match /donor-appointments/{appointmentId} {
+      // Create: hospitals create appointments when matching donors
+      allow create: if isHospital();
+
+      // Read: the donor, the linked patient, or hospital staff
+      allow read: if isHospital()
+                  || (isDonor() && resource.data.donorId == request.auth.uid)
+                  || (isPatient() && resource.data.linkedPatientId == request.auth.uid);
+
+      // Update: hospitals (status changes); donors (confirm/decline)
+      allow update: if isHospital()
+                    || (isDonor() && resource.data.donorId == request.auth.uid);
+
+      // Delete: hospitals only
+      allow delete: if isHospital();
+    }
+
+
+    // ══════════════════════════════════════════════════════════════
+    // 14. APPOINTMENTS COLLECTION — Legacy appointment records
+    // ══════════════════════════════════════════════════════════════
+    match /appointments/{appointmentId} {
+      allow create: if isHospital();
+      allow read: if isHospital()
+                  || (isDonor() && resource.data.donorId == request.auth.uid);
+      allow update: if isHospital();
+      allow delete: if isHospital();
+    }
+
+
+    // ══════════════════════════════════════════════════════════════
+    // 15. HOSPITALS COLLECTION — Hospital directory
+    //     (patients can add unverified hospitals)
+    // ══════════════════════════════════════════════════════════════
+    match /hospitals/{hospitalId} {
+      // Create: patients can add hospitals; hospitals can too
+      allow create: if isPatient() || isHospital();
+
+      // Read: any signed-in user (for hospital search/browse)
+      allow read: if isSignedIn();
+
+      // Update: hospitals only (for verification, inventory updates)
+      allow update: if isHospital();
+
+      // Delete: hospitals only
+      allow delete: if isHospital();
+    }
+
+
+    // ══════════════════════════════════════════════════════════════
+    // 16. PENDING-HOSPITALS — Hospitals awaiting admin verification
+    // ══════════════════════════════════════════════════════════════
+    match /pending-hospitals/{pendingId} {
+      allow create: if isPatient() || isHospital();
+      allow read: if isHospital();
+      allow update: if isHospital();
+      allow delete: if isHospital();
+    }
+
+
+    // ══════════════════════════════════════════════════════════════
+    // 17. SAVED-DONORS — Hospital's saved/bookmarked donor list
+    // ══════════════════════════════════════════════════════════════
+    match /saved-donors/{savedId} {
+      allow create: if isHospital();
+      allow read: if isHospital();
+      allow update: if isHospital();
+      allow delete: if isHospital();
+    }
+
+
+    // ══════════════════════════════════════════════════════════════
+    // 18. NOTIFICATIONS COLLECTION — Push notifications for users
+    // ══════════════════════════════════════════════════════════════
+    match /notifications/{notifId} {
+      // Create: hospitals create notifications for donors/patients
+      allow create: if isHospital();
+
+      // Read: only the notification's target user
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      // Update: the target user (to mark as read)
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      // Delete: the target user
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+
+    // ══════════════════════════════════════════════════════════════
+    // 19. BLOOD-INVENTORY — Per-hospital blood inventory
+    //     (doc ID = hospitalId or clinicId)
+    // ══════════════════════════════════════════════════════════════
+    match /blood-inventory/{inventoryId} {
+      allow create: if isHospital();
+
+      // Read: any signed-in user (patients search by blood availability)
+      allow read: if isSignedIn();
+
+      // Update: only the owning hospital
+      allow update: if isHospital() && isOwner(inventoryId);
+
+      // Delete: only the owning hospital
+      allow delete: if isHospital() && isOwner(inventoryId);
+    }
+
+
+    // ══════════════════════════════════════════════════════════════
+    // 20. VETERINARY-BLOOD-INVENTORY — ZICP forecast inventory
+    //     (accessed by Firebase Admin SDK server-side, but rules
+    //      should still protect client-side access)
+    // ══════════════════════════════════════════════════════════════
+    match /veterinary-blood-inventory/{inventoryId} {
+      allow create: if isHospital();
+      allow read: if isHospital();
+      allow update: if isHospital() && isOwner(inventoryId);
+      allow delete: if isHospital() && isOwner(inventoryId);
+    }
+
+
+    // ══════════════════════════════════════════════════════════════
+    // CATCH-ALL — Deny everything else
+    // ══════════════════════════════════════════════════════════════
     match /{document=**} {
       allow read, write: if false;
     }
