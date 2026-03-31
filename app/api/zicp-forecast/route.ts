@@ -4,8 +4,8 @@ import { adminDb } from "@/lib/firebase-admin";
 // ── Constants ────────────────────────────────────────────────────────────────
 const ALPHA = 0.05; // significance level → 95% nominal coverage
 const CANINE_BLOOD_TYPES = [
-  "DEA1.1", "DEA1.2", "DEA3", "DEA4",
-  "DEA5", "DEA7", "DEA1-NEG", "UNKNOWN"
+  "DEA 1.1+", "DEA 1.1-", "DEA 1.2+", "DEA 1.2-",
+  "DEA 3", "DEA 4", "DEA 5", "DEA 7", "Universal"
 ];
 const LOOKBACK_DAYS = 180; // 6 months of history per paper's dataset range
 
@@ -41,42 +41,48 @@ async function fetchDemandHistory(clinicId: string): Promise<DemandRecord[]> {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - LOOKBACK_DAYS);
 
-  // Step 1: get all donor-requests belonging to this clinic
-  const requestsSnap = await adminDb
-    .collection("veterinary-donor-requests")
+  // Source 1: completed donor-appointments (actual transfusions)
+  const apptSnap = await adminDb
+    .collection("donor-appointments")
     .where("clinicId", "==", clinicId)
+    .where("status", "==", "completed")
     .get();
 
+  // Source 2: completed patient requests (alternative transfusion events)
+  const patSnap = await adminDb
+    .collection("patients")
+    .where("clinicId", "==", clinicId)
+    .where("request_status", "==", "completed")
+    .get();
+
+  // Aggregate daily demand per blood type
   const dailyMap: Record<string, number> = {};
 
-  if (!requestsSnap.empty) {
-    const requestIds = requestsSnap.docs.map((d) => d.id);
-
-    // Step 2: fetch completed appointments for those requests
-    // Firestore "in" supports max 30 per query — chunk if needed
-    const CHUNK = 30;
-    for (let i = 0; i < requestIds.length; i += CHUNK) {
-      const chunk = requestIds.slice(i, i + CHUNK);
-      const apptSnap = await adminDb
-        .collection("donor-appointments")
-        .where("requestId", "in", chunk)
-        .where("status", "==", "completed")
-        .get();
-
-      apptSnap.docs.forEach((d) => {
-        const data = d.data();
-        const dateTs: FirebaseFirestore.Timestamp | undefined = data.completedAt;
-        const bloodType: string | undefined = data.dogBloodType; // ← correct field
-        if (!dateTs || !bloodType) return;
-        const date = dateTs.toDate();
-        if (date < cutoff) return;
-        const key = `${date.toISOString().slice(0, 10)}|${bloodType}`;
-        dailyMap[key] = (dailyMap[key] || 0) + 1;
-      });
-    }
+  function addEvent(
+    dateTs: FirebaseFirestore.Timestamp | undefined,
+    bloodType: string | undefined
+  ) {
+    if (!dateTs || !bloodType) return;
+    const date = dateTs.toDate();
+    if (date < cutoff) return;
+    const key = `${date.toISOString().slice(0, 10)}|${bloodType}`;
+    dailyMap[key] = (dailyMap[key] || 0) + 1;
   }
 
-  // Build full daily zero-filled grid
+  apptSnap.docs.forEach((d) => {
+    const data = d.data();
+    addEvent(
+      data.completedAt || data.matchedAt,
+      data.patientBloodGroup || data.bloodType
+    );
+  });
+
+  patSnap.docs.forEach((d) => {
+    const data = d.data();
+    addEvent(data.completedAt || data.updatedAt, data.p_bloodgroup);
+  });
+
+  // Expand to full daily grid (fill zeros for missing days)
   const records: DemandRecord[] = [];
   const today = new Date();
 
@@ -85,17 +91,22 @@ async function fetchDemandHistory(clinicId: string): Promise<DemandRecord[]> {
     for (let i = LOOKBACK_DAYS; i >= 0; i--) {
       const d = new Date(today);
       d.setDate(d.getDate() - i);
-      demands.push(dailyMap[`${d.toISOString().slice(0, 10)}|${bt}`] || 0);
+      const dateStr = d.toISOString().slice(0, 10);
+      const key = `${dateStr}|${bt}`;
+      demands.push(dailyMap[key] || 0);
     }
+
     for (let i = 0; i < demands.length; i++) {
       const d = new Date(today);
       d.setDate(d.getDate() - (LOOKBACK_DAYS - i));
+      const dateStr = d.toISOString().slice(0, 10);
       const rolling7 =
         i >= 7
           ? demands.slice(i - 7, i).reduce((a, b) => a + b, 0) / 7
           : demands.slice(0, i).reduce((a, b) => a + b, 0) / Math.max(1, i);
+
       records.push({
-        date: d.toISOString().slice(0, 10),
+        date: dateStr,
         bloodType: bt,
         demand: demands[i],
         dayOfWeek: d.getDay(),
@@ -104,35 +115,27 @@ async function fetchDemandHistory(clinicId: string): Promise<DemandRecord[]> {
       });
     }
   }
+
   return records;
 }
-
-// Maps blood type string → Firestore field key in veterinary-blood-inventory
-const BT_TO_FIRESTORE_KEY: Record<string, string> = {
-  "DEA1.1":   "DEA1_1_count",
-  "DEA1.2":   "DEA1_2_count",
-  "DEA3":     "DEA3_count",
-  "DEA4":     "DEA4_count",
-  "DEA5":     "DEA5_count",
-  "DEA7":     "DEA7_count",
-  "DEA1-NEG": "DEA1_NEG_count",
-  "UNKNOWN":  "UNKNOWN_count",
-};
 
 async function fetchInventory(
   clinicId: string
 ): Promise<Record<string, number>> {
-  const snap = await adminDb
-    .collection("veterinary-blood-inventory")
-    .doc(clinicId)
-    .get();
+  const snap = await adminDb.collection("blood-inventory").doc(clinicId).get();
   if (!snap.exists) return {};
   const data = snap.data() || {};
-  const result: Record<string, number> = {};
-  for (const [bt, firestoreKey] of Object.entries(BT_TO_FIRESTORE_KEY)) {
-    result[bt] = Number(data[firestoreKey]) || 0;
+
+  // Normalize keys — inventory may store "DEA1.1+" or "DEA 1.1+" etc.
+  const normalized: Record<string, number> = {};
+  for (const [k, v] of Object.entries(data)) {
+    const clean = k
+      .replace(/_/g, " ")
+      .replace(/([A-Z]+)(\d)/g, "$1 $2")
+      .trim();
+    normalized[clean] = Number(v) || 0;
   }
-  return result;
+  return normalized;
 }
 
 // ── ZICP Core Algorithm (TypeScript port of Algorithm 1) ─────────────────────
@@ -334,7 +337,13 @@ export async function GET(req: NextRequest) {
     ]);
 
     const results: ZICPResult[] = CANINE_BLOOD_TYPES.map((bt) => {
-      const currentInventory = inventory[bt] ?? 0;
+      // Find inventory match for this blood type (normalize for comparison)
+      const invEntry = Object.entries(inventory).find(
+        ([k]) =>
+          k.toLowerCase().replace(/\s/g, "") ===
+          bt.toLowerCase().replace(/\s/g, "")
+      );
+      const currentInventory = invEntry ? invEntry[1] : 0;
       return runZICP(demandHistory, bt, currentInventory);
     });
 
