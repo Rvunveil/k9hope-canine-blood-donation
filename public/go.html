@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>K9 Hope — Redirecting...</title>
+  <meta name="description" content="K9 Hope Canine Blood Donation — redirecting you now." />
+
+  <!--
+    ╔══════════════════════════════════════════════════════════╗
+    ║   DYNAMIC QR CODE REDIRECT FILE                         ║
+    ║   To change where the QR code points:                   ║
+    ║   1. Edit the TARGET_URL variable below                  ║
+    ║   2. Commit and push — NO new QR code needed!           ║
+    ║   The QR code always points to this file's raw URL.     ║
+    ╚══════════════════════════════════════════════════════════╝
+  -->
+
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #e05f5f;
+      --accent2: #f0a060;
+      --paw: #e05f5f;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100dvh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2.5rem 2rem;
+      max-width: 400px;
+      width: 100%;
+      text-align: center;
+    }
+
+    .paw-icon {
+      font-size: 3rem;
+      margin-bottom: 1rem;
+      display: block;
+      animation: pulse 1.8s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.12); opacity: 0.85; }
+    }
+
+    h1 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      margin-bottom: 0.4rem;
+      color: var(--text);
+    }
+
+    .subtitle {
+      font-size: 0.9rem;
+      color: var(--muted);
+      margin-bottom: 2rem;
+    }
+
+    .progress-track {
+      background: var(--border);
+      border-radius: 999px;
+      height: 6px;
+      margin-bottom: 1.5rem;
+      overflow: hidden;
+    }
+
+    .progress-bar {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      width: 0%;
+      transition: width 0.1s linear;
+    }
+
+    .countdown {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 1.5rem;
+    }
+
+    .countdown span {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .btn {
+      display: inline-block;
+      background: var(--accent);
+      color: #fff;
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 600;
+      padding: 0.65rem 1.5rem;
+      border-radius: 8px;
+      transition: opacity 0.2s, transform 0.2s;
+    }
+
+    .btn:hover { opacity: 0.85; transform: translateY(-1px); }
+
+    .destination {
+      margin-top: 1.25rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+      word-break: break-all;
+    }
+
+    .destination a {
+      color: var(--muted);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <span class="paw-icon">🐾</span>
+    <h1>K9 Hope</h1>
+    <p class="subtitle">Canine Blood Donation Platform</p>
+
+    <div class="progress-track">
+      <div class="progress-bar" id="bar"></div>
+    </div>
+
+    <p class="countdown">Redirecting in <span id="sec">3</span>s…</p>
+
+    <a href="#" id="go-btn" class="btn">Go now →</a>
+
+    <p class="destination">
+      Destination: <a href="#" id="dest-link" target="_blank" rel="noopener noreferrer"></a>
+    </p>
+  </div>
+
+  <script>
+    /**
+     * ┌──────────────────────────────────────────────┐
+     * │  EDIT THIS URL to change the QR destination  │
+     * │  Then commit & push. QR code stays the same! │
+     * └──────────────────────────────────────────────┘
+     */
+    const TARGET_URL = "https://github.com/Rvunveil/k9hope-canine-blood-donation";
+
+    // Wire up UI
+    const btn = document.getElementById("go-btn");
+    const destLink = document.getElementById("dest-link");
+    const bar = document.getElementById("bar");
+    const secEl = document.getElementById("sec");
+
+    btn.href = TARGET_URL;
+    destLink.href = TARGET_URL;
+    destLink.textContent = TARGET_URL;
+
+    // Countdown + progress bar
+    const DELAY = 3000; // ms
+    const start = Date.now();
+
+    function tick() {
+      const elapsed = Date.now() - start;
+      const pct = Math.min((elapsed / DELAY) * 100, 100);
+      bar.style.width = pct + "%";
+      const remaining = Math.ceil((DELAY - elapsed) / 1000);
+      secEl.textContent = Math.max(remaining, 0);
+
+      if (elapsed >= DELAY) {
+        window.location.href = TARGET_URL;
+      } else {
+        requestAnimationFrame(tick);
+      }
+    }
+
+    requestAnimationFrame(tick);
+  </script>
+</body>
+</html>
