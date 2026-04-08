@@ -27,9 +27,11 @@ export function encryptData(data: string) {
 export function decryptData(ciphertext: string) {
   try {
     const bytes = CryptoJS.AES.decrypt(ciphertext, COOKIE_ENCRYPT_KEY);
-    return bytes.toString(CryptoJS.enc.Utf8);
+    const result = bytes.toString(CryptoJS.enc.Utf8);
+    // If result is empty, the cookie was stored as plaintext (pre-fix) — return as-is
+    return result || ciphertext;
   } catch (error) {
-    return null;
+    return ciphertext; // Return raw value if decrypt fails (plaintext cookie)
   }
 }
 

@@ -300,7 +300,33 @@ export async function loginUserDatabase(role: string, loginId: string) {
                     // ✅ If User exists in users collection, return existing userId
                     if (!querySnapshot.empty) {
                         const existingUserId = querySnapshot.docs[0].id;
-                        console.log("User exists, returning userId:", existingUserId);
+                        const userData = querySnapshot.docs[0].data();
+                        console.log("Existing org user found:", existingUserId);
+
+                        // Check if organisations document exists
+                        const orgDocRef = doc(db, "organisations", existingUserId);
+                        const orgSnap = await getDoc(orgDocRef);
+
+                        if (!orgSnap.exists()) {
+                            // User exists but not in organisations collection - create org profile
+                            console.log("Creating organisations profile for existing user");
+                            await setDoc(orgDocRef, {
+                                email: loginId.toLowerCase().trim(),
+                                onboarded: "no",
+                                createdAt: new Date(),
+                                role: "organization"
+                            }, { merge: true });
+
+                            // Update users collection to add organisation role
+                            const currentRoles = userData.roles || [userData.role];
+                            if (!currentRoles.includes("organisation")) {
+                                await updateDoc(querySnapshot.docs[0].ref, {
+                                    roles: [...currentRoles, "organisation"],
+                                    updatedAt: new Date()
+                                });
+                            }
+                        }
+
                         return existingUserId;
                     }
                 } catch (queryError) {
@@ -318,6 +344,7 @@ export async function loginUserDatabase(role: string, loginId: string) {
                     await setDoc(userDocRef, {
                         email: loginId.toLowerCase().trim(),
                         role: "organisation",
+                        roles: ["organisation"],
                         onboarded: "no",
                         createdAt: new Date(),
                         updatedAt: new Date()
