@@ -40,8 +40,19 @@ export async function loginUserDatabase(role: string, loginId: string) {
 
         switch (role) {
             case "patient": {
+                // Normalize phone: strip leading +91 or 91, keep 10 digits, then re-add +91
+                let normalizedPhone = loginId.trim();
+                if (normalizedPhone.startsWith("+91")) {
+                    normalizedPhone = "+91" + normalizedPhone.slice(3);
+                } else if (normalizedPhone.startsWith("91") && normalizedPhone.length === 12) {
+                    normalizedPhone = "+91" + normalizedPhone.slice(2);
+                } else if (normalizedPhone.length === 10) {
+                    normalizedPhone = "+91" + normalizedPhone;
+                }
+                console.log("Normalized phone:", normalizedPhone);
+
                 const usersRef = collection(db, "users");
-                const q = query(usersRef, where("phone", "==", loginId.toLowerCase().trim()));
+                const q = query(usersRef, where("phone", "==", normalizedPhone));
 
                 try {
                     const querySnapshot = await getDocs(q);
@@ -61,7 +72,7 @@ export async function loginUserDatabase(role: string, loginId: string) {
                             // User exists but not as patient - create patient profile
                             console.log("Creating patient profile for existing user");
                             await setDoc(patientDocRef, {
-                                phone: loginId.toLowerCase().trim(),
+                                phone: normalizedPhone,
                                 onboarded: "no",
                                 createdAt: new Date(),
                                 role: "individual"
@@ -86,7 +97,7 @@ export async function loginUserDatabase(role: string, loginId: string) {
 
                     const userDocRef = doc(db, "users", userId);
                     await setDoc(userDocRef, {
-                        phone: loginId.toLowerCase().trim(),
+                        phone: normalizedPhone,
                         roles: ["patient"], // Array of roles
                         role: "patient", // Primary role for backward compatibility
                         onboarded: "no",
@@ -96,7 +107,7 @@ export async function loginUserDatabase(role: string, loginId: string) {
 
                     const patientDocRef = doc(db, "patients", userId);
                     await setDoc(patientDocRef, {
-                        phone: loginId.toLowerCase().trim(),
+                        phone: normalizedPhone,
                         onboarded: "no",
                         createdAt: new Date(),
                         role: "individual"
@@ -113,8 +124,19 @@ export async function loginUserDatabase(role: string, loginId: string) {
             }
 
             case "donor": {
+                // Normalize phone: strip leading +91 or 91, keep 10 digits, then re-add +91
+                let normalizedPhone = loginId.trim();
+                if (normalizedPhone.startsWith("+91")) {
+                    normalizedPhone = "+91" + normalizedPhone.slice(3);
+                } else if (normalizedPhone.startsWith("91") && normalizedPhone.length === 12) {
+                    normalizedPhone = "+91" + normalizedPhone.slice(2);
+                } else if (normalizedPhone.length === 10) {
+                    normalizedPhone = "+91" + normalizedPhone;
+                }
+                console.log("Normalized phone:", normalizedPhone);
+
                 const usersRef = collection(db, "users");
-                const q = query(usersRef, where("phone", "==", loginId.toLowerCase().trim()));
+                const q = query(usersRef, where("phone", "==", normalizedPhone));
 
                 try {
                     const querySnapshot = await getDocs(q);
@@ -134,7 +156,7 @@ export async function loginUserDatabase(role: string, loginId: string) {
                             // User exists but not as donor - create donor profile
                             console.log("Creating donor profile for existing user");
                             await setDoc(donorDocRef, {
-                                phone: loginId.toLowerCase().trim(),
+                                phone: normalizedPhone,
                                 onboarded: "no",
                                 createdAt: new Date(),
                                 role: "individual"
@@ -159,7 +181,7 @@ export async function loginUserDatabase(role: string, loginId: string) {
 
                     const userDocRef = doc(db, "users", userId);
                     await setDoc(userDocRef, {
-                        phone: loginId.toLowerCase().trim(),
+                        phone: normalizedPhone,
                         roles: ["donor"], // Array of roles
                         role: "donor", // Primary role for backward compatibility
                         onboarded: "no",
@@ -169,7 +191,7 @@ export async function loginUserDatabase(role: string, loginId: string) {
 
                     const donorDocRef = doc(db, "donors", userId);
                     await setDoc(donorDocRef, {
-                        phone: loginId.toLowerCase().trim(),
+                        phone: normalizedPhone,
                         onboarded: "no",
                         createdAt: new Date(),
                         role: "individual"
