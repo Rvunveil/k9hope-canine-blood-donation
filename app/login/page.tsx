@@ -4,7 +4,7 @@ import * as React from "react"
 import { useState, useEffect } from "react"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
-import { Moon, Sun, ArrowLeft } from "lucide-react"
+import { Moon, Sun, ArrowLeft, PawPrint, Heart, Droplets } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -178,17 +178,21 @@ const PatientContent: React.FC = () => {
 
   function defaultUI() {
     return (
-      <div>
-        <h1 className="text-2xl font-bold mb-4">Welcome, Patient!</h1>
-        <p className="mb-4">
-          Here you can request/find blood.
+      <div className="bg-orange-50 dark:bg-orange-950/20 rounded-2xl p-6 shadow-sm">
+        <div className="flex items-center gap-2 mb-3 text-orange-500">
+          <PawPrint className="h-5 w-5" />
+          <Heart className="h-5 w-5" />
+        </div>
+        <h1 className="text-2xl font-bold mb-2">Find Blood for Your Dog 🐾</h1>
+        <p className="mb-5 text-muted-foreground text-sm">
+          Sign in with your phone to request emergency canine blood near you.
         </p>
         <form>
           <div className="flex justify-center items-center w-full h-full">
             <PEPhoneButton onVerify={handleVerificationSuccess} />
           </div>
         </form>
-      </div >
+      </div>
     )
   }
 
@@ -275,9 +279,15 @@ const DonorContent: React.FC = () => {
 
   function defaultUI() {
     return (
-      <div>
-        <h1 className="text-2xl font-bold mb-4">Welcome, Donor!</h1>
-        <p className="mb-4">Here you can donate blood.</p>
+      <div className="bg-red-50 dark:bg-red-950/20 rounded-2xl p-6 shadow-sm">
+        <div className="flex items-center gap-2 mb-3 text-red-500">
+          <Heart className="h-5 w-5" />
+          <Droplets className="h-5 w-5" />
+        </div>
+        <h1 className="text-2xl font-bold mb-2">Your Dog Can Save Lives ❤️</h1>
+        <p className="mb-5 text-muted-foreground text-sm">
+          Every donation counts. Sign in to register your dog as a blood donor.
+        </p>
         <form>
           <div className="flex justify-center items-center w-full h-full">
             <PEPhoneButton onVerify={handleVerificationSuccess} />
@@ -369,17 +379,17 @@ const VeterinaryContent: React.FC = () => {
 
   function defaultUI() {
     return (
-      <div>
-        <h1 className="text-2xl font-bold mb-4">Registering as a Veterinary Clinic 🏥</h1>
-        <p className="mb-4">
-          Connect directly with dog donors to get the blood your patients need.
+      <div className="bg-blue-50 dark:bg-blue-950/20 rounded-2xl p-6 shadow-sm">
+        <h1 className="text-2xl font-bold mb-2">Welcome Back, Vet Clinic 🏥</h1>
+        <p className="mb-5 text-muted-foreground text-sm">
+          Sign in to manage blood requests and connect with dog donors in your area.
         </p>
         <form>
           <div className="flex justify-center items-center w-full h-full pb-4">
             <PEEmailButton onVerify={handleVerificationSuccess} />
           </div>
         </form>
-        <p className="text-gray-500 text-sm">Only professional emails allowed. No @gmail, @outlook, etc. Personal emails are currently allowed for testing.</p>
+        <p className="text-muted-foreground text-xs">Only professional emails allowed. No @gmail, @outlook, etc. Personal emails are currently allowed for testing.</p>
       </div>
     );
   }
@@ -484,17 +494,17 @@ const OrganisationContent: React.FC = () => {
 
   function defaultUI() {
     return (
-      <div>
-        <h1 className="text-2xl font-bold mb-4">Registering as an Organisation/NGO 👥</h1>
-        <p className="mb-4">
-          Organize donation drives and support those in urgent need.
+      <div className="bg-green-50 dark:bg-green-950/20 rounded-2xl p-6 shadow-sm">
+        <h1 className="text-2xl font-bold mb-2">Welcome Back, Organisation 👥</h1>
+        <p className="mb-5 text-muted-foreground text-sm">
+          Sign in to coordinate donation drives and manage your network.
         </p>
         <form>
           <div className="flex justify-center items-center w-full h-full pb-4">
             <PEEmailButton onVerify={handleVerificationSuccess} />
           </div>
         </form>
-        <p className="text-gray-500 text-sm">Only professional emails allowed. No @gmail, @outlook, etc. Personal emails are currently allowed for testing.</p>
+        <p className="text-muted-foreground text-xs">Only professional emails allowed. No @gmail, @outlook, etc. Personal emails are currently allowed for testing.</p>
       </div>
     );
   }
