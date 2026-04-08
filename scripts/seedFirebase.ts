@@ -1,6 +1,12 @@
 // scripts/seedFirebase.ts
-// Run with: npx ts-node --skip-project scripts/seedFirebase.ts
+// Run with: npx tsx scripts/seedFirebase.ts
 // SAFE: Only creates new docs. Never touches existing data.
+// 
+// SETUP: Add to .env.local before running:
+// SEED_DONOR_UID=<Firebase Auth UID from Authentication tab>
+// SEED_PATIENT_UID=<Firebase Auth UID from Authentication tab>
+// SEED_CLINIC_UID=<Firebase Auth UID from Authentication tab>
+// Then run: npx tsx scripts/seedFirebase.ts
 
 // Load .env.local manually since this is a script, not Next.js
 import * as dotenv from "dotenv";
@@ -21,6 +27,11 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+
+// Read Real UIDs from .env.local
+const REAL_DONOR_UID   = process.env.SEED_DONOR_UID   || null;
+const REAL_PATIENT_UID = process.env.SEED_PATIENT_UID || null;
+const REAL_CLINIC_UID  = process.env.SEED_CLINIC_UID  || null;
 
 function genId(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -71,7 +82,8 @@ const seededClinicIds: Array<{ userId: string; name: string; city: string }> = [
 async function seedDonors(count = 30) {
   console.log(`\n🐕 Seeding ${count} donors...`);
   for (let i = 0; i < count; i++) {
-    const userId = genId();
+    // PART 1: Use REAL_DONOR_UID for the first donor, else genId()
+    const userId = (i === 0 && REAL_DONOR_UID) ? REAL_DONOR_UID : genId();
     const city = randomFrom(cities);
     const dogName = randomFrom(dogNames);
     const ownerName = randomFrom(ownerNames);
@@ -85,12 +97,15 @@ async function seedDonors(count = 30) {
       d_bloodgroup: bloodGroup,
       d_phone: `+91${Math.floor(7000000000 + Math.random() * 2999999999)}`,
       d_age: Math.floor(1.5 + Math.random() * 7),
-      d_weight: Math.floor(15 + Math.random() * 30),
+      // PART 5: Fix donor dashboard fields
+      d_weight_kg: Math.floor(15 + Math.random() * 30),
+      d_isMedicalCondition: "no",
       d_breed: randomFrom(breeds),
       d_gender: randomFrom(["Male", "Female"]),
       d_pincode: pincodes[city],
       d_address: `${Math.floor(1 + Math.random() * 200)}, ${city}, Chennai`,
       d_lastDonation: lastDonationDaysAgo ? daysAgo(lastDonationDaysAgo) : null,
+      d_donationCount: Math.floor(Math.random() * 5),
       onboarded: "yes",
       role: "individual",
       createdAt: daysAgo(Math.floor(Math.random() * 120)),
@@ -116,13 +131,19 @@ async function seedDonors(count = 30) {
 async function seedPatients(count = 25) {
   console.log(`\n🩸 Seeding ${count} patients...`);
   for (let i = 0; i < count; i++) {
-    const userId = genId();
+    // PART 1: Use REAL_PATIENT_UID for the first patient, else genId()
+    const userId = (i === 0 && REAL_PATIENT_UID) ? REAL_PATIENT_UID : genId();
     const city = randomFrom(cities);
     const dogName = randomFrom(dogNames);
     const ownerName = randomFrom(ownerNames);
     const urgency = randomFrom(urgencies);
-    const bloodGroup = randomFrom(bloodGroups);
+    let bloodGroup = randomFrom(bloodGroups);
     const reason = randomFrom(reasons);
+    
+    // Ensure the first patient has the same blood group as the first donor (for correct cross-linking)
+    if (i === 0 && seededDonorIds.length > 0) {
+      bloodGroup = seededDonorIds[0].bloodGroup;
+    }
 
     const patientData = {
       p_name: dogName,
@@ -187,8 +208,12 @@ function randInt(min: number, max: number): number {
 
 async function seedVeterinaries() {
   console.log(`\n🏥 Seeding ${vetClinics.length} vet clinics...`);
+  let isFirstClinic = true;
   for (const clinic of vetClinics) {
-    const userId = genId();
+    // PART 1: Use REAL_CLINIC_UID for the first clinic, else genId()
+    const userId = (isFirstClinic && REAL_CLINIC_UID) ? REAL_CLINIC_UID : genId();
+    isFirstClinic = false;
+    
     const email = `${clinic.name.toLowerCase().replace(/\s+/g, ".").replace(/[^a-z.]/g, "")}@vetclinic.in`;
 
     const vetData = {
@@ -283,14 +308,24 @@ async function seedDonorAppointmentLinks() {
     return;
   }
 
-  const clinicId = seededClinicIds[0]?.userId || "unknown-clinic";
   let created = 0;
 
   // Match donors to patients by blood group (exact match required)
-  for (const patient of seededPatientIds) {
+  for (let i = 0; i < seededPatientIds.length; i++) {
+    const patient = seededPatientIds[i];
     // Find a donor with the same blood group
-    const matchingDonor = seededDonorIds.find(d => d.bloodGroup === patient.bloodGroup);
+    const matchingDonor = seededDonorIds.find((d, index) => {
+        // If this is the FIRST patient (the real one), explicitly match it with the FIRST donor (the real one)
+        if (i === 0 && index === 0) return true;
+        return d.bloodGroup === patient.bloodGroup;
+    });
     if (!matchingDonor) continue;
+
+    // We must ensure the first link uses the real clinic ID if available
+    let clinicId = seededClinicIds[0]?.userId || "unknown-clinic";
+    if (i === 0 && REAL_CLINIC_UID) {
+        clinicId = REAL_CLINIC_UID;
+    }
 
     // Create the donor-appointments doc
     await addDoc(collection(db, "donor-appointments"), {

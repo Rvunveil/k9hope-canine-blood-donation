@@ -190,7 +190,8 @@ export default function DonorDashboard() {
       }
     }
 
-    const isMedicallyFit = donorData.d_isMedicalCondition !== "yes" && donorData.d_weight_kg >= 25;
+    const weight = donorData.d_weight_kg ?? (donorData as any).d_weight ?? 0;
+    const isMedicallyFit = donorData.d_isMedicalCondition !== "yes" && weight >= 25;
     if (!isMedicallyFit) { isEligible = false; nextEligible = "See Profile"; }
 
     return {
