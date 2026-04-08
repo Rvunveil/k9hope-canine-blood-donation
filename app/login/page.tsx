@@ -604,19 +604,19 @@ export default function LoginPage() {
   }
 
   // Get user data from context
-  const { userId, role, onboarded, device } = useUser();
+  const { userId, role, onboarded, device, isAuthLoading } = useUser();
   const router = useRouter();
 
   // Redirect loggedins (userId != null) to app
   useEffect(() => {
-    if (userId !== null) {
+    if (!isAuthLoading && userId !== null && role !== "guest") {
       const timeout = setTimeout(() => {
         router.push("/app");
       }, 1000);
 
       return () => clearTimeout(timeout); // Cleanup function to avoid memory leaks
     }
-  }, [userId, router]);
+  }, [userId, role, isAuthLoading, router]);
 
   // Define variants with explicit transitions.
   const roleSelectionVariants: Variants = {

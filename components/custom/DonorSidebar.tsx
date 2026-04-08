@@ -18,10 +18,12 @@ import { useState } from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "@/firebaseConfig";
 import { useRouter } from "next/navigation";
+import { useUser } from "@/context/UserContext";
 
 export default function DonorSidebar() {
     const pathname = usePathname();
     const router = useRouter();
+    const { clearAuth } = useUser();
     const [isDonateExpanded, setIsDonateExpanded] = useState(true);
 
     const isActive = (path: string) => pathname === path;
@@ -29,7 +31,8 @@ export default function DonorSidebar() {
     const handleLogout = async () => {
         try {
             await signOut(auth);
-            router.push("/");
+            clearAuth();
+            router.push("/login");
         } catch (error) {
             console.error("Logout error:", error);
         }

@@ -98,13 +98,14 @@ export default function DashboardPage() {
   useEffect(() => {
     async function fetchHospitalInventory() {
       try {
-        // Fetch hospitals in patient's city with blood inventory
-        // If city is not available, default to "Chennai" or fetch all
+        // FIX 4: Query `veterinaries` collection instead of `hospitals`
+        // The seed data lives in `veterinaries`, not `hospitals`.
+        // Field names: v_city (not h_city), v_name (not h_name)
         const city = profile?.p_city || "Chennai";
-        const hospitalsRef = collection(db, "hospitals");
+        const vetsRef = collection(db, "veterinaries");
         const q = query(
-          hospitalsRef,
-          where("h_city", "==", city)
+          vetsRef,
+          where("v_city", "==", city)
         );
 
         const snapshot = await getDocs(q);
@@ -113,7 +114,7 @@ export default function DashboardPage() {
         for (const docSnap of snapshot.docs) {
           const data = docSnap.data();
 
-          // Fetch blood inventory for this hospital
+          // FIX 3: blood-inventory doc ID equals the vet's userId (same as docSnap.id)
           const inventoryRef = doc(db, "blood-inventory", docSnap.id);
           const inventorySnap = await getDoc(inventoryRef);
           const inventoryData = inventorySnap.exists() ? inventorySnap.data() : {};
@@ -124,9 +125,9 @@ export default function DashboardPage() {
 
           hospitalsData.push({
             id: docSnap.id,
-            h_name: data.h_name,
-            phone: data.phone,
-            h_city: data.h_city,
+            h_name: data.v_name,    // veterinaries uses v_name
+            phone: data.v_phone,    // veterinaries uses v_phone
+            h_city: data.v_city,    // veterinaries uses v_city
             stock: stock,
             bloodType: bloodTypeKey,
           });

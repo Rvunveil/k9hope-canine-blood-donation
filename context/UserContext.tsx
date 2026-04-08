@@ -122,6 +122,21 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     setDevice(newDevice);
   }
 
+  // Proper logout: clears cookies, sessionStorage, AND resets React state
+  function handleClearAuth() {
+    Cookies.remove("userId");
+    Cookies.remove("role");
+    Cookies.remove("onboarded");
+    Cookies.remove("phone");
+    if (typeof window !== "undefined") {
+      sessionStorage.removeItem("pendingRole");
+    }
+    setUserId(null);
+    setRole("guest");
+    setOnboarded("guest");
+    setPhone(null);
+  }
+
   // Load stored user data from cookies on mount
   useEffect(() => {
     // Detect device on mount (client-side only)
@@ -249,7 +264,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   }, [userId]);
 
   return (
-    <UserContext.Provider value={{ userId, role, onboarded, device, phone, isAuthLoading, setUser, setDevice: updateDevice, clearAuth }}>
+    <UserContext.Provider value={{ userId, role, onboarded, device, phone, isAuthLoading, setUser, setDevice: updateDevice, clearAuth: handleClearAuth }}>
       {children}
     </UserContext.Provider>
   );

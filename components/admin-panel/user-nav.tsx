@@ -44,13 +44,13 @@ function getInitials(name: string): string {
 
 export function UserNav() {
 
-  const { userId, role, device, setUser } = useUser();
+  const { userId, role, device, setUser, clearAuth } = useUser();
   const router = useRouter();
   const [profile, setProfile] = useState<any>(null);
 
   function handleLogout() {
-    setUser(null, "guest", "guest");
-    router.push("/");
+    clearAuth();
+    router.push("/login");
   }
 
   // Fetch data when the component loads
