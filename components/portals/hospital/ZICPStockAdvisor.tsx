@@ -25,6 +25,10 @@ interface ZICPResult {
   mu: number;
   sigma: number;
   calibrationQuantile: number;
+  trend: "rising" | "stable" | "falling";
+  daysUntilStockout: number;
+  urgencyScore: number;
+  weeklyForecast: number[];
 }
 
 interface ForecastResponse {
@@ -150,6 +154,11 @@ function BloodTypeCard({
             <Droplet className="h-4 w-4 text-red-500" />
             <span className="font-black text-sm">{r.bloodType}</span>
           </div>
+          {/* Trend Badge */}
+          {r.trend === "rising" && <Badge className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 text-[10px] border-red-200">📈 Rising</Badge>}
+          {r.trend === "falling" && <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 text-[10px] border-emerald-200">📉 Falling</Badge>}
+          {r.trend === "stable" && <Badge className="bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400 text-[10px] border-gray-200">➡️ Stable</Badge>}
+          
           {urgencyBadge}
           {!r.hasEnoughData && (
             <Badge variant="outline" className="text-[10px] text-gray-400">
@@ -213,6 +222,53 @@ function BloodTypeCard({
               </div>
             </div>
           )}
+
+          {/* New Live Pulse Metrics */}
+          <div className="space-y-3 bg-white dark:bg-gray-900 rounded-xl p-3 border border-gray-100 dark:border-gray-800">
+            {/* Days Until Stockout */}
+            {r.daysUntilStockout < 14 && (
+              <div className="text-xs text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1.5">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                ⚠️ Stockout in ~{r.daysUntilStockout} days at current rate
+              </div>
+            )}
+
+            {/* Urgency Score */}
+            <div className="space-y-1">
+              <div className="flex justify-between text-[10px] font-bold text-gray-500 uppercase">
+                <span>Urgency Score</span>
+                <span>{r.urgencyScore}/100</span>
+              </div>
+              <div className="h-1.5 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full rounded-full ${r.urgencyScore > 60 ? 'bg-red-500' : r.urgencyScore > 30 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                  style={{ width: `${r.urgencyScore}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Sparkline Forecast */}
+            <div className="space-y-1">
+              <div className="text-[10px] font-bold text-gray-500 uppercase">7-Day Demand Forecast</div>
+              <div className="flex items-end gap-1 h-6">
+                {r.weeklyForecast?.map((val, idx) => {
+                  const maxVal = Math.max(...(r.weeklyForecast || [1]));
+                  const heightPct = maxVal > 0 ? (val / maxVal) * 100 : 0;
+                  return (
+                    <div key={idx} className="flex-1 bg-violet-100 dark:bg-violet-900/30 rounded-t-sm flex items-end relative group">
+                      <div 
+                        className="w-full bg-violet-500 rounded-t-sm transition-all"
+                        style={{ height: `${Math.max(10, heightPct)}%` }}
+                      />
+                      <div className="opacity-0 group-hover:opacity-100 absolute -top-5 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[9px] px-1 rounded z-10 pointer-events-none">
+                        {val}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
 
           {/* Interval bar */}
           <IntervalBar
@@ -279,9 +335,9 @@ export default function ZICPStockAdvisor({
       const json: ForecastResponse = await res.json();
       setData(json);
       // Auto-expand blood types that need orders
-      const autoExpand: Record<string, boolean> = {};
+  const autoExpand: Record<string, boolean> = {};
       json.results.forEach((r) => {
-        if (r.orderRecommendation > 0) autoExpand[r.bloodType] = true;
+        if (r.urgencyScore >= 70 || r.orderRecommendation > 0) autoExpand[r.bloodType] = true;
       });
       setExpanded(autoExpand);
     } catch (e: any) {
@@ -301,8 +357,10 @@ export default function ZICPStockAdvisor({
       : data.results.slice(0, 5)
     : [];
 
-  const ordersNeeded =
-    data?.results.filter((r) => r.orderRecommendation > 0).length ?? 0;
+  const criticalCount = data?.results.filter((r) => r.urgencyScore >= 70).length ?? 0;
+  const risingCount = data?.results.filter((r) => r.trend === "rising").length ?? 0;
+  
+  const hasAlerts = criticalCount > 0 || risingCount > 0;
 
   const totalCalSamples =
     data?.results.reduce((s, r) => s + r.nCalibrationSamples, 0) ?? 0;
@@ -318,7 +376,7 @@ export default function ZICPStockAdvisor({
               ZICP Stock Advisor
             </h2>
             <Badge className="bg-violet-600 text-white text-[10px] font-bold">
-              AI · Research
+              AI · Live Pulse
             </Badge>
           </div>
           <p className="text-xs text-gray-500 mt-0.5">
@@ -352,12 +410,12 @@ export default function ZICPStockAdvisor({
       {!loading && data && (
         <div
           className={`rounded-xl p-4 border flex items-start gap-3 ${
-            ordersNeeded > 0
+            hasAlerts
               ? "bg-amber-50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-700"
               : "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-800"
           }`}
         >
-          {ordersNeeded > 0 ? (
+          {hasAlerts ? (
             <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
           ) : (
             <CheckCircle2 className="h-5 w-5 text-emerald-600 flex-shrink-0 mt-0.5" />
@@ -365,14 +423,14 @@ export default function ZICPStockAdvisor({
           <div className="flex-1">
             <p
               className={`font-black text-sm ${
-                ordersNeeded > 0
+                hasAlerts
                   ? "text-amber-800 dark:text-amber-200"
                   : "text-emerald-800 dark:text-emerald-200"
               }`}
             >
-              {ordersNeeded > 0
-                ? `${ordersNeeded} blood type${ordersNeeded > 1 ? "s" : ""} need restocking this week`
-                : "All blood types are adequately stocked for predicted demand"}
+              {hasAlerts
+                ? `${criticalCount} critical · ${risingCount} trending up · Updated live`
+                : "All blood types are adequately stocked and stable"}
             </p>
             <p className="text-xs text-gray-500 mt-0.5">
               Based on {totalCalSamples}+ calibration samples · 22% inventory

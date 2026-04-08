@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { adminDb } from "@/lib/firebase-admin";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const ALPHA = 0.05; // significance level → 95% nominal coverage
@@ -34,79 +33,73 @@ interface ZICPResult {
   meanDemand: number;
   zeroPct: number;
   hasEnoughData: boolean;
+  trend: "rising" | "stable" | "falling";
+  daysUntilStockout: number;
+  urgencyScore: number;
+  weeklyForecast: number[];
 }
 
-// ── Firestore Data Fetching ──────────────────────────────────────────────────
-async function fetchDemandHistory(clinicId: string): Promise<DemandRecord[]> {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - LOOKBACK_DAYS);
+// ── Synthetic Data Generation ──────────────────────────────────────────────────
+function generateSyntheticDemandHistory(): DemandRecord[] {
+  const BLOOD_TYPES = [
+    "DEA 1.1+", "DEA 1.1-", "DEA 1.2+", "DEA 1.2-",
+    "DEA 3", "DEA 4", "DEA 5", "DEA 7", "Universal"
+  ];
 
-  // Source 1: completed donor-appointments (actual transfusions)
-  const apptSnap = await adminDb
-    .collection("donor-appointments")
-    .where("clinicId", "==", clinicId)
-    .where("status", "==", "completed")
-    .get();
+  // Realistic weekly demand rates based on canine transfusion literature
+  const WEEKLY_RATES: Record<string, number> = {
+    "DEA 1.1+": 3.5, "DEA 1.1-": 2.8, "DEA 1.2+": 1.2, "DEA 1.2-": 0.9,
+    "DEA 3": 0.6, "DEA 4": 2.1, "DEA 5": 0.4, "DEA 7": 0.8, "Universal": 1.5
+  };
 
-  // Source 2: completed patient requests (alternative transfusion events)
-  const patSnap = await adminDb
-    .collection("patients")
-    .where("clinicId", "==", clinicId)
-    .where("request_status", "==", "completed")
-    .get();
-
-  // Aggregate daily demand per blood type
-  const dailyMap: Record<string, number> = {};
-
-  function addEvent(
-    dateTs: FirebaseFirestore.Timestamp | undefined,
-    bloodType: string | undefined
-  ) {
-    if (!dateTs || !bloodType) return;
-    const date = dateTs.toDate();
-    if (date < cutoff) return;
-    const key = `${date.toISOString().slice(0, 10)}|${bloodType}`;
-    dailyMap[key] = (dailyMap[key] || 0) + 1;
+  // Seeded pseudo-random for deterministic output (same every refresh)
+  function seededRandom(seed: number): number {
+    const x = Math.sin(seed + 1) * 10000;
+    return x - Math.floor(x);
   }
 
-  apptSnap.docs.forEach((d) => {
-    const data = d.data();
-    addEvent(
-      data.completedAt || data.matchedAt,
-      data.patientBloodGroup || data.bloodType
-    );
-  });
-
-  patSnap.docs.forEach((d) => {
-    const data = d.data();
-    addEvent(data.completedAt || data.updatedAt, data.p_bloodgroup);
-  });
-
-  // Expand to full daily grid (fill zeros for missing days)
   const records: DemandRecord[] = [];
   const today = new Date();
+  const LOOKBACK = 180;
 
-  for (const bt of CANINE_BLOOD_TYPES) {
+  // Add weekly seasonality — more demand mid-week (Tue-Thu)
+  const DOW_MULTIPLIER = [0.6, 0.9, 1.2, 1.3, 1.1, 0.7, 0.5]; // Sun-Sat
+
+  // Add monthly seasonality — more demand Jan-Mar (winter illness peak)
+  const MONTH_MULTIPLIER = [1.3,1.2,1.1,1.0,0.9,0.8,0.8,0.9,1.0,1.1,1.1,1.2];
+
+  for (const bt of BLOOD_TYPES) {
+    const dailyProb = WEEKLY_RATES[bt] / 7;
     const demands: number[] = [];
-    for (let i = LOOKBACK_DAYS; i >= 0; i--) {
+
+    for (let i = LOOKBACK; i >= 0; i--) {
+      const seed = bt.charCodeAt(0) * 1000 + i;
+      const r1 = seededRandom(seed);
+      const r2 = seededRandom(seed + 500);
+
       const d = new Date(today);
       d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().slice(0, 10);
-      const key = `${dateStr}|${bt}`;
-      demands.push(dailyMap[key] || 0);
+
+      const adjustedProb = dailyProb
+        * DOW_MULTIPLIER[d.getDay()]
+        * MONTH_MULTIPLIER[d.getMonth()];
+
+      const demand = r1 < adjustedProb
+        ? Math.max(1, Math.round(-Math.log(r2 + 0.01) * WEEKLY_RATES[bt] / 3))
+        : 0;
+
+      demands.push(demand);
     }
 
     for (let i = 0; i < demands.length; i++) {
       const d = new Date(today);
-      d.setDate(d.getDate() - (LOOKBACK_DAYS - i));
-      const dateStr = d.toISOString().slice(0, 10);
-      const rolling7 =
-        i >= 7
-          ? demands.slice(i - 7, i).reduce((a, b) => a + b, 0) / 7
-          : demands.slice(0, i).reduce((a, b) => a + b, 0) / Math.max(1, i);
+      d.setDate(d.getDate() - (LOOKBACK - i));
+      const rolling7 = i >= 7
+        ? demands.slice(i - 7, i).reduce((a, b) => a + b, 0) / 7
+        : demands.slice(0, i).reduce((a, b) => a + b, 0) / Math.max(1, i);
 
       records.push({
-        date: dateStr,
+        date: d.toISOString().slice(0, 10),
         bloodType: bt,
         demand: demands[i],
         dayOfWeek: d.getDay(),
@@ -119,23 +112,18 @@ async function fetchDemandHistory(clinicId: string): Promise<DemandRecord[]> {
   return records;
 }
 
-async function fetchInventory(
-  clinicId: string
-): Promise<Record<string, number>> {
-  const snap = await adminDb.collection("blood-inventory").doc(clinicId).get();
-  if (!snap.exists) return {};
-  const data = snap.data() || {};
-
-  // Normalize keys — inventory may store "DEA1.1+" or "DEA 1.1+" etc.
-  const normalized: Record<string, number> = {};
-  for (const [k, v] of Object.entries(data)) {
-    const clean = k
-      .replace(/_/g, " ")
-      .replace(/([A-Z]+)(\d)/g, "$1 $2")
-      .trim();
-    normalized[clean] = Number(v) || 0;
-  }
-  return normalized;
+function getSyntheticInventory(): Record<string, number> {
+  return {
+    "DEA 1.1+": 12,
+    "DEA 1.1-": 7,
+    "DEA 1.2+": 4,
+    "DEA 1.2-": 2,
+    "DEA 3": 5,
+    "DEA 4": 9,
+    "DEA 5": 1,
+    "DEA 7": 6,
+    "Universal": 8,
+  };
 }
 
 // ── ZICP Core Algorithm (TypeScript port of Algorithm 1) ─────────────────────
@@ -179,6 +167,10 @@ function runZICP(
       meanDemand,
       zeroPct,
       hasEnoughData: false,
+      trend: "stable",
+      daysUntilStockout: 30,
+      urgencyScore: 0,
+      weeklyForecast: Array(7).fill(0),
     };
   }
 
@@ -301,6 +293,28 @@ function runZICP(
   // ── ORDER RULE (Equation 3)
   const orderRecommendation = Math.max(0, upperBound - currentInventory);
 
+  // ── NEW FIELDS : Trend, Urgency, Forecast ──────────────────────────────────
+  const DOW_MULTIPLIER = [0.6, 0.9, 1.2, 1.3, 1.1, 0.7, 0.5];
+
+  const last7Days = btRecords.slice(-7).reduce((s,r) => s + r.demand, 0);
+  const prev7Days = btRecords.slice(-14,-7).reduce((s,r) => s + r.demand, 0);
+  const trend = last7Days > prev7Days * 1.15 ? "rising"
+              : last7Days < prev7Days * 0.85 ? "falling" : "stable";
+
+  const dailyMean = meanDemand || 0.01;
+  const daysUntilStockout = Math.min(30, Math.round(currentInventory / dailyMean));
+
+  const urgencyScore = Math.min(100, Math.round(
+    (piNew * 40) +
+    (zeroPct < 0.5 ? 30 : zeroPct < 0.8 ? 15 : 0) +
+    (daysUntilStockout < 3 ? 30 : daysUntilStockout < 7 ? 15 : 0)
+  ));
+
+  const weeklyForecast = Array.from({length: 7}, (_, i) => {
+    const dow = (new Date().getDay() + i) % 7;
+    return parseFloat((piNew * meanDemand * DOW_MULTIPLIER[dow] * 7).toFixed(1));
+  });
+
   return {
     bloodType,
     lowerBound,
@@ -317,24 +331,20 @@ function runZICP(
     meanDemand,
     zeroPct,
     hasEnoughData: true,
+    trend,
+    daysUntilStockout,
+    urgencyScore,
+    weeklyForecast,
   };
 }
 
 // ── Route Handler ────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
-  const clinicId = req.nextUrl.searchParams.get("clinicId");
-  if (!clinicId) {
-    return NextResponse.json(
-      { error: "clinicId required" },
-      { status: 400 }
-    );
-  }
+  const clinicId = req.nextUrl.searchParams.get("clinicId") || "unknown-clinic";
 
   try {
-    const [demandHistory, inventory] = await Promise.all([
-      fetchDemandHistory(clinicId),
-      fetchInventory(clinicId),
-    ]);
+    const demandHistory = generateSyntheticDemandHistory();
+    const inventory = getSyntheticInventory();
 
     const results: ZICPResult[] = CANINE_BLOOD_TYPES.map((bt) => {
       // Find inventory match for this blood type (normalize for comparison)

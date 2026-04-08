@@ -14,7 +14,7 @@ import * as path from "path";
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, setDoc, collection, addDoc, writeBatch } from "firebase/firestore";
+import { getFirestore, doc, setDoc, collection, addDoc, writeBatch, getDocs, query, where } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "",
@@ -62,7 +62,12 @@ const pincodes: Record<string, string> = {
 const urgencies = ["immediate", "within_24_hours", "within_3_days", "within_3_days", "within_24_hours"];
 const dogNames = ["Bruno", "Max", "Charlie", "Rocky", "Buddy", "Luna", "Bella", "Coco", "Milo", "Daisy", "Tommy", "Ruby", "Simba", "Shadow", "Zeus", "Nala", "Duke", "Molly", "Rex", "Lily"];
 const ownerNames = ["Arjun Kumar", "Priya Rajan", "Karthik Subramanian", "Divya Mohan", "Rahul Sharma", "Sneha Krishnan", "Vikram Pillai", "Anjali Nair", "Suresh Babu", "Meena Rajendran", "Arun Selvan", "Kavitha Anand", "Rajesh Murugan", "Lakshmi Venkat", "Deepak Iyer"];
-const reasons = ["Anaemia", "Post-surgery recovery", "Trauma", "Tick fever", "Ehrlichiosis", "Bone marrow disease", "Internal bleeding"];
+const DIAGNOSES = [
+  "Hemorrhagic shock", "Trauma", "Tick fever", "Internal bleeding",
+  "Bone marrow disease", "Immune-mediated hemolytic anemia",
+  "Surgical blood loss", "Splenic rupture", "Parvovirus",
+  "Chronic kidney disease", "Liver failure", "Sepsis"
+];
 const vetClinics = [
   { name: "Paws & Care Veterinary Clinic", area: "Ambattur" },
   { name: "Chennai Pet Hospital", area: "Anna Nagar" },
@@ -79,11 +84,42 @@ const seededDonorIds: Array<{ userId: string; bloodGroup: string; city: string; 
 const seededPatientIds: Array<{ userId: string; bloodGroup: string; city: string; name: string }> = [];
 const seededClinicIds: Array<{ userId: string; name: string; city: string }> = [];
 
+// FIX: Deterministic ID seeding and cleanup
+async function clearPreviousSeedData() {
+  console.log(`\n🧹 Clearing previous seeded data to prevent duplicates...`);
+  const collections = [
+    "patients", "donors", "veterinaries",
+    "blood-inventory", "veterinary-blood-inventory", "hospital-blood-inventory",
+    "users", "donations", "appointments"
+  ];
+  
+  for (const col of collections) {
+    const snap = await getDocs(query(collection(db, col), where("isSeeded", "==", true)));
+    if (snap.docs.length > 0) {
+      const batch = writeBatch(db);
+      snap.docs.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+      console.log(`  🗑️ Cleared ${snap.docs.length} seeded docs from ${col}`);
+    }
+  }
+
+  // Clear seeded donor-appointments
+  const apptSnap = await getDocs(query(collection(db, "donor-appointments"), where("isSimulated", "==", true)));
+  if (apptSnap.docs.length > 0) {
+    const batch2 = writeBatch(db);
+    apptSnap.docs.forEach(d => batch2.delete(d.ref));
+    await batch2.commit();
+    console.log(`  🗑️ Cleared ${apptSnap.docs.length} simulated donor appointments`);
+  }
+}
+
 async function seedDonors(count = 30) {
   console.log(`\n🐕 Seeding ${count} donors...`);
   for (let i = 0; i < count; i++) {
-    // PART 1: Use REAL_DONOR_UID for the first donor, else genId()
-    const userId = (i === 0 && REAL_DONOR_UID) ? REAL_DONOR_UID : genId();
+    // PART 1: Use REAL_DONOR_UID for the first donor, else deterministic seeded ID
+    const userId = (i === 0 && REAL_DONOR_UID) 
+      ? REAL_DONOR_UID 
+      : `seed-donor-${i.toString().padStart(3, "0")}`;
     const city = randomFrom(cities);
     const dogName = randomFrom(dogNames);
     const ownerName = randomFrom(ownerNames);
@@ -110,6 +146,7 @@ async function seedDonors(count = 30) {
       role: "individual",
       createdAt: daysAgo(Math.floor(Math.random() * 120)),
       updatedAt: daysAgo(Math.floor(Math.random() * 30)),
+      isSeeded: true,
     };
 
     await setDoc(doc(db, "donors", userId), donorData);
@@ -120,6 +157,7 @@ async function seedDonors(count = 30) {
       onboarded: "yes",
       createdAt: donorData.createdAt,
       updatedAt: donorData.updatedAt,
+      isSeeded: true,
     });
 
     // FIX 2: Track for cross-linking
@@ -131,19 +169,41 @@ async function seedDonors(count = 30) {
 async function seedPatients(count = 25) {
   console.log(`\n🩸 Seeding ${count} patients...`);
   for (let i = 0; i < count; i++) {
-    // PART 1: Use REAL_PATIENT_UID for the first patient, else genId()
-    const userId = (i === 0 && REAL_PATIENT_UID) ? REAL_PATIENT_UID : genId();
+    const userId = (i === 0 && REAL_PATIENT_UID) 
+      ? REAL_PATIENT_UID 
+      : `seed-patient-${i.toString().padStart(3, "0")}`;
     const city = randomFrom(cities);
     const dogName = randomFrom(dogNames);
     const ownerName = randomFrom(ownerNames);
     const urgency = randomFrom(urgencies);
     let bloodGroup = randomFrom(bloodGroups);
-    const reason = randomFrom(reasons);
+    const reason = randomFrom(DIAGNOSES);
     
     // Ensure the first patient has the same blood group as the first donor (for correct cross-linking)
     if (i === 0 && seededDonorIds.length > 0) {
       bloodGroup = seededDonorIds[0].bloodGroup;
     }
+
+    // Varied SOFA Score fields
+    const r = Math.random();
+    let pcv_value;
+    if (r < 0.15) pcv_value = 12 + Math.random() * 2; // Critical
+    else if (r < 0.35) pcv_value = 16 + Math.random() * 3; // High
+    else if (r < 0.65) pcv_value = 21 + Math.random() * 3; // Moderate
+    else pcv_value = 35 + Math.random() * 15; // Normal
+
+    const ocrScore = Math.floor(40 + Math.random() * 55);
+    
+    const allCritical = ["DIC Risk","Sepsis","Multi-organ","Organ Failure","Coagulopathy","Toxemia"];
+    const allHigh = ["Trauma","Post-op","Emergency","Transfusion","Severe Anemia","Internal Bleeding","Shock"];
+    const allMed = ["Anemia","Low PCV","Tick Fever","Parvovirus","Surgery","Pyometra"];
+    let flags = [];
+    if (r < 0.15) flags.push(randomFrom(allCritical), randomFrom(allHigh));
+    else if (r < 0.35) flags.push(randomFrom(allHigh), randomFrom(allMed));
+    else if (r < 0.65) flags.push(randomFrom(allMed));
+
+    let weight = Math.floor(10 + Math.random() * 30);
+    if (r < 0.2) weight = 6 + Math.random() * 3; // compound risk
 
     const patientData = {
       p_name: dogName,
@@ -153,7 +213,9 @@ async function seedPatients(count = 25) {
       p_bloodgroup: bloodGroup,
       p_phone: `+91${Math.floor(7000000000 + Math.random() * 2999999999)}`,
       p_age: Math.floor(0.5 + Math.random() * 12),
-      p_weight: Math.floor(8 + Math.random() * 35),
+      p_weight: weight,
+      p_weight_kg: weight,
+      pcv_value: Math.round(pcv_value),
       p_breed: randomFrom(breeds),
       p_gender: randomFrom(["Male", "Female"]),
       p_pincode: pincodes[city],
@@ -162,12 +224,18 @@ async function seedPatients(count = 25) {
       p_reasonRequirment: reason,              // shown in donor hero card
       p_quantityRequirment: randomFrom(["1", "2", "1", "1"]),  // shown in patient dashboard
       p_condition: reason,
+      initialDocument: {
+        ocrScore: ocrScore,
+        ocrFlags: flags,
+        fileName: "Initial_BloodWork.pdf"
+      },
       // FIX 1: request_status REQUIRED — donor dashboard queries where("request_status", "in", ["pending","accepted"])
       request_status: "pending",
       onboarded: "yes",
       role: "individual",
       createdAt: daysAgo(Math.floor(Math.random() * 60)),
       updatedAt: daysAgo(Math.floor(Math.random() * 15)),
+      isSeeded: true,
     };
 
     await setDoc(doc(db, "patients", userId), patientData);
@@ -178,6 +246,7 @@ async function seedPatients(count = 25) {
       onboarded: "yes",
       createdAt: patientData.createdAt,
       updatedAt: patientData.updatedAt,
+      isSeeded: true,
     });
 
     // FIX 2: Track for cross-linking
@@ -209,10 +278,13 @@ function randInt(min: number, max: number): number {
 async function seedVeterinaries() {
   console.log(`\n🏥 Seeding ${vetClinics.length} vet clinics...`);
   let isFirstClinic = true;
+  let i = 0;
   for (const clinic of vetClinics) {
-    // PART 1: Use REAL_CLINIC_UID for the first clinic, else genId()
-    const userId = (isFirstClinic && REAL_CLINIC_UID) ? REAL_CLINIC_UID : genId();
+    const userId = (isFirstClinic && REAL_CLINIC_UID) 
+      ? REAL_CLINIC_UID 
+      : `seed-clinic-${i.toString().padStart(3, "0")}`;
     isFirstClinic = false;
+    i++;
     
     const email = `${clinic.name.toLowerCase().replace(/\s+/g, ".").replace(/[^a-z.]/g, "")}@vetclinic.in`;
 
@@ -265,9 +337,10 @@ async function seedVeterinaries() {
 async function seedDonations(count = 40) {
   console.log(`\n💉 Seeding ${count} donation records...`);
   for (let i = 0; i < count; i++) {
-    await addDoc(collection(db, "donations"), {
-      donorId: genId(),
-      patientId: genId(),
+    const donationId = `seed-donation-${i.toString().padStart(3, "0")}`;
+    await setDoc(doc(db, "donations", donationId), {
+      donorId: `seed-donor-${Math.floor(Math.random() * 30).toString().padStart(3, "0")}`,
+      patientId: `seed-patient-${Math.floor(Math.random() * 25).toString().padStart(3, "0")}`,
       donationDate: daysAgo(Math.floor(Math.random() * 365)),
       bloodType: randomFrom(bloodGroups),
       amount: randomFrom(["200ml", "250ml", "300ml", "450ml"]),
@@ -275,23 +348,26 @@ async function seedDonations(count = 40) {
       location: randomFrom(vetClinics).name,
       notes: randomFrom(["Smooth donation", "Dog was calm", "First-time donor", "Regular donor", ""]),
       createdAt: daysAgo(Math.floor(Math.random() * 365)),
+      isSeeded: true,
     });
     if ((i + 1) % 10 === 0) console.log(`  ✅ ${i + 1}/${count} donations`);
   }
 }
 
 async function seedAppointments(count = 20) {
-  console.log(`\n📅 Seeding ${count} appointments...`);
+  console.log(`\n📅 Seeding ${count} general appointments...`);
   for (let i = 0; i < count; i++) {
     const isFuture = i % 2 === 0;
-    await addDoc(collection(db, "appointments"), {
-      donorId: genId(),
-      patientId: genId(),
+    const apptId = `seed-appt-gen-${i.toString().padStart(3, "0")}`;
+    await setDoc(doc(db, "appointments", apptId), {
+      donorId: `seed-donor-${Math.floor(Math.random() * 30).toString().padStart(3, "0")}`,
+      patientId: `seed-patient-${Math.floor(Math.random() * 25).toString().padStart(3, "0")}`,
       appointmentDate: isFuture ? daysAgo(-Math.floor(Math.random() * 14)) : daysAgo(Math.floor(Math.random() * 30)),
       status: randomFrom(["confirmed", "confirmed", "pending", "completed", "cancelled"]),
       location: randomFrom(vetClinics).name,
       notes: randomFrom(["Blood group confirmed", "Donor pre-screened", "Urgent case", ""]),
       createdAt: daysAgo(Math.floor(Math.random() * 30)),
+      isSeeded: true,
     });
   }
   console.log(`  ✅ ${count} appointments created`);
@@ -327,8 +403,10 @@ async function seedDonorAppointmentLinks() {
         clinicId = REAL_CLINIC_UID;
     }
 
-    // Create the donor-appointments doc
-    await addDoc(collection(db, "donor-appointments"), {
+    const apptId = `seed-appt-initial-${matchingDonor.userId}-${patient.userId}`;
+    
+    // Create the donor-appointments doc with a deterministic ID
+    await setDoc(doc(db, "donor-appointments", apptId), {
       donorId: matchingDonor.userId,          // real donor userId
       linkedPatientId: patient.userId,         // real patient userId — queried by patient dashboard
       linkedPatientName: patient.name,         // patient's dog name — shown in donor dashboard Branch A
@@ -339,6 +417,7 @@ async function seedDonorAppointmentLinks() {
       matchedAt: new Date(),                   // used by UrgencyCountdown component
       clinicId: clinicId,                      // vet clinic that created this match
       notes: "",
+      isSimulated: true,                       // Added for cleanup
     });
     created++;
 
@@ -357,6 +436,7 @@ async function seedClinicBloodInventory(clinicId: string) {
     "DEA 3": 5, "DEA 4": 9, "DEA 5": 1, "DEA 7": 6, "Universal": 8,
     clinicId: clinicId,
     updatedAt: new Date(),
+    isSeeded: true,
   };
   
   // Write to ALL possible collection names the app might read from
@@ -402,7 +482,8 @@ async function seedZICPDemandHistory(clinicId: string) {
           // Add slight time variation
           date.setHours(Math.floor(Math.random() * 8) + 8); // 8am-4pm
           
-          const ref = doc(collection(db, "donor-appointments"));
+          const demandId = `seed-demand-${bt.replace(/\s/g,"-")}-${daysAgo}-${q}`;
+          const ref = doc(db, "donor-appointments", demandId);
           batch.set(ref, {
             clinicId: clinicId,
             bloodType: bt,
@@ -436,7 +517,9 @@ async function seedZICPDemandHistory(clinicId: string) {
 async function main() {
   console.log("🚀 K9Hope Firebase Seed Script");
   console.log("================================");
-  console.log("⚠️  Creates NEW docs only — existing data is safe\n");
+  console.log("⚠️  Creates NEW docs and performs CLEANUP — safe to run repeatedly\n");
+
+  await clearPreviousSeedData();
   console.log("📋 What this seeds:");
   console.log("   donors          → 30 donors with onboarded=yes");
   console.log("   patients        → 25 patients with request_status=pending (FIX 1)");
