@@ -7,7 +7,7 @@ import Cookies from "js-cookie";
 import CryptoJS from "crypto-js";
 import { db } from "@/firebaseConfig";
 import { doc, getDoc } from "firebase/firestore";
-const COOKIE_ENCRYPT_KEY = process.env.NEXT_PUBLIC_COOKIE_ENCRYPT_KEY;
+const COOKIE_ENCRYPT_KEY = process.env.NEXT_PUBLIC_COOKIE_ENCRYPT_KEY || "k9hope-mvp-2026-fallback-key";
 
 // Function to Encrypt Data
 export function encryptData(data: string) {
@@ -168,16 +168,22 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
                 const userData = docSnap.data();
                 const freshOnboardedStatus = userData.onboarded === "yes" ? "yes" : "no";
 
-                // Update only if different from cookie
+                // Refresh all session cookies to prevent expiry
+                setEncryptedCookie("userId", storedUserId, 7);
+                setEncryptedCookie("role", storedRole, 7);
+
+                // Always trust Firestore as source of truth for onboarded status
+                setOnboarded(freshOnboardedStatus as Onboarded);
+                setEncryptedCookie("onboarded", freshOnboardedStatus, 7);
                 if (freshOnboardedStatus !== storedStatus) {
-                  console.log("Updating onboarded status:", freshOnboardedStatus);
-                  setOnboarded(freshOnboardedStatus as Onboarded);
-                  setEncryptedCookie("onboarded", freshOnboardedStatus, 7);
+                  console.log("Onboarded status updated from Firestore:", storedStatus, "->", freshOnboardedStatus);
                 }
 
                 // Update phone if available
                 if (userData.phone && userData.phone !== storedPhone) {
                   setPhone(userData.phone);
+                }
+                if (userData.phone) {
                   setEncryptedCookie("phone", userData.phone, 7);
                 }
               }

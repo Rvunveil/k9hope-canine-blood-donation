@@ -196,7 +196,33 @@ export async function loginUserDatabase(role: string, loginId: string) {
                     // ✅ If User exists in users collection, return existing userId
                     if (!querySnapshot.empty) {
                         const existingUserId = querySnapshot.docs[0].id;
+                        const userData = querySnapshot.docs[0].data();
                         console.log("User exists, returning userId:", existingUserId);
+
+                        // Check if veterinaries document exists
+                        const vetDocRef = doc(db, "veterinaries", existingUserId);
+                        const vetSnap = await getDoc(vetDocRef);
+
+                        if (!vetSnap.exists()) {
+                            // User exists but not in veterinaries collection - create vet profile
+                            console.log("Creating veterinary profile for existing user");
+                            await setDoc(vetDocRef, {
+                                email: loginId.toLowerCase().trim(),
+                                onboarded: "no",
+                                createdAt: new Date(),
+                                role: "organization"
+                            }, { merge: true });
+
+                            // Update users collection to add veterinary role
+                            const currentRoles = userData.roles || [userData.role];
+                            if (!currentRoles.includes("veterinary")) {
+                                await updateDoc(querySnapshot.docs[0].ref, {
+                                    roles: [...currentRoles, "veterinary"],
+                                    updatedAt: new Date()
+                                });
+                            }
+                        }
+
                         return existingUserId;
                     }
                 } catch (queryError) {
@@ -214,6 +240,7 @@ export async function loginUserDatabase(role: string, loginId: string) {
                     await setDoc(userDocRef, {
                         email: loginId.toLowerCase().trim(),
                         role: "veterinary",
+                        roles: ["veterinary"],
                         onboarded: "no",
                         createdAt: new Date(),
                         updatedAt: new Date()
@@ -221,9 +248,9 @@ export async function loginUserDatabase(role: string, loginId: string) {
 
                     console.log("Successfully created user in users collection");
 
-                    // Also create entry in clinics collection for detailed data
-                    const clinicDocRef = doc(db, "clinics", userId);
-                    await setDoc(clinicDocRef, {
+                    // Also create entry in veterinaries collection for detailed data
+                    const vetDocRef = doc(db, "veterinaries", userId);
+                    await setDoc(vetDocRef, {
                         email: loginId.toLowerCase().trim(),
                         onboarded: "no",
                         createdAt: new Date(),
