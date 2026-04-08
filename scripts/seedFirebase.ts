@@ -14,7 +14,7 @@ import * as path from "path";
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, setDoc, collection, addDoc } from "firebase/firestore";
+import { getFirestore, doc, setDoc, collection, addDoc, writeBatch } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "",
@@ -350,6 +350,89 @@ async function seedDonorAppointmentLinks() {
   console.log(`  ℹ️  donorId → linkedPatientId cross-links with status=pending_donor_acceptance`);
 }
 
+// PROBLEM 3: Write correct blood inventory to correct collection
+async function seedClinicBloodInventory(clinicId: string) {
+  const inventory = {
+    "DEA 1.1+": 12, "DEA 1.1-": 7, "DEA 1.2+": 4, "DEA 1.2-": 2,
+    "DEA 3": 5, "DEA 4": 9, "DEA 5": 1, "DEA 7": 6, "Universal": 8,
+    clinicId: clinicId,
+    updatedAt: new Date(),
+  };
+  
+  // Write to ALL possible collection names the app might read from
+  await setDoc(doc(db, "veterinary-blood-inventory", clinicId), inventory, { merge: true });
+  await setDoc(doc(db, "blood-inventory", clinicId), inventory, { merge: true });
+  await setDoc(doc(db, "hospital-blood-inventory", clinicId), inventory, { merge: true });
+  
+  console.log(`  ✅ Seeded fixed blood inventory for clinic ${clinicId}`);
+}
+
+// PROBLEM 2: Seed needs realistic 180-day demand history for ZICP
+async function seedZICPDemandHistory(clinicId: string) {
+  const BLOOD_TYPES = [
+    "DEA 1.1+", "DEA 1.1-", "DEA 1.2+", "DEA 1.2-",
+    "DEA 3", "DEA 4", "DEA 5", "DEA 7", "Universal"
+  ];
+  
+  // Realistic demand rates per blood type (transfusions per week)
+  const DEMAND_RATES: Record<string, number> = {
+    "DEA 1.1+": 3.5, "DEA 1.1-": 2.8, "DEA 1.2+": 1.2, "DEA 1.2-": 0.9,
+    "DEA 3": 0.6, "DEA 4": 2.1, "DEA 5": 0.4, "DEA 7": 0.8, "Universal": 1.5
+  };
+
+  let batch = writeBatch(db);
+  const today = new Date();
+  let count = 0;
+  let totalDocs = 0;
+
+  console.log(`\n📈 Seeding historical demand events for robust ZICP prediction...`);
+
+  for (const bt of BLOOD_TYPES) {
+    const weeklyRate = DEMAND_RATES[bt];
+    const dailyProb = weeklyRate / 7; // probability of demand on any given day
+
+    for (let daysAgo = 180; daysAgo >= 0; daysAgo--) {
+      // Simulate zero-inflated demand: most days have 0, some have 1-3
+      if (Math.random() < dailyProb) {
+        const demandQty = Math.floor(Math.random() * 3) + 1; // 1-3 units
+        
+        for (let q = 0; q < demandQty; q++) {
+          const date = new Date(today);
+          date.setDate(date.getDate() - daysAgo);
+          // Add slight time variation
+          date.setHours(Math.floor(Math.random() * 8) + 8); // 8am-4pm
+          
+          const ref = doc(collection(db, "donor-appointments"));
+          batch.set(ref, {
+            clinicId: clinicId,
+            bloodType: bt,
+            patientBloodGroup: bt,
+            status: "completed",
+            completedAt: date,
+            matchedAt: date,
+            donorId: `sim-donor-${bt.replace(/\s/g,"-")}-${daysAgo}-${q}`,
+            linkedPatientId: `sim-patient-${daysAgo}-${q}`,
+            isSimulated: true,
+          });
+          count++;
+          totalDocs++;
+
+          if(count >= 400) {
+            await batch.commit();
+            batch = writeBatch(db);
+            count = 0;
+          }
+        }
+      }
+    }
+  }
+  
+  if(count > 0) {
+    await batch.commit();
+  }
+  console.log(`  ✅ Seeded ${totalDocs} ZICP demand history docs for clinic ${clinicId}`);
+}
+
 async function main() {
   console.log("🚀 K9Hope Firebase Seed Script");
   console.log("================================");
@@ -367,6 +450,11 @@ async function main() {
   await seedDonations(40);
   await seedAppointments(20);
   await seedDonorAppointmentLinks(); // must run after donors + patients + clinics
+
+  // ZICP requirements (180 days history + accurate inventory)
+  const targetClinicId = REAL_CLINIC_UID || seededClinicIds[0]?.userId || "unknown-clinic";
+  await seedClinicBloodInventory(targetClinicId);
+  await seedZICPDemandHistory(targetClinicId);
 
   console.log("\n✅ Done! 30 donors | 25 patients | 8 vet clinics | 40 donations | 20 appointments | donor-appointment links");
   console.log("\n🔑 Key fixes applied:");
