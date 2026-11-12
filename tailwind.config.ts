@@ -10,7 +10,25 @@ export default {
 	prefix: "",
 	theme: {
     	extend: {
+    		fontFamily: {
+    			display: ['"Bricolage Grotesque Variable"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+    			reading: ['"Atkinson Hyperlegible"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+    		},
     		colors: {
+    			/* K9HOPE public-site palette (landing page only) */
+    			k9: {
+    				night: '#0B201C',
+    				forest: '#14362F',
+    				moss: '#24524A',
+    				bone: '#EEF1EA',
+    				paper: '#F8FAF6',
+    				teal: '#43C2B1',
+    				'teal-ink': '#0F6E66',
+    				coral: '#FF806C',
+    				'coral-ink': '#B8392A',
+    				mist: '#A7BDB4',
+    				slate: '#4A5F58',
+    			},
     			background: 'hsl(var(--background))',
     			foreground: 'hsl(var(--foreground))',
     			card: {

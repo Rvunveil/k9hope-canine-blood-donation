@@ -1,0 +1,148 @@
+/* K9HOPE public site. Scoped to .k9 so the application portals are unaffected. */
+
+.k9 {
+  font-family: "Atkinson Hyperlegible", ui-sans-serif, system-ui, sans-serif;
+  color: #0b201c;
+  background: #f8faf6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1;
+}
+
+.k9 h1,
+.k9 h2,
+.k9 h3,
+.k9 .font-display {
+  font-family: "Bricolage Grotesque Variable", ui-sans-serif, system-ui, sans-serif;
+  font-optical-sizing: auto;
+  text-wrap: balance;
+}
+
+.k9 p {
+  text-wrap: pretty;
+}
+
+.k9 :focus-visible {
+  outline: 2px solid #43c2b1;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.k9 .on-light :focus-visible,
+.k9 .on-light:focus-visible {
+  outline-color: #0f6e66;
+}
+
+.k9 .tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Skip link */
+.k9 .skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -4rem;
+  z-index: 100;
+  padding: 0.75rem 1rem;
+  background: #43c2b1;
+  color: #0b201c;
+  font-weight: 700;
+  border-radius: 6px;
+  transition: top 0.15s ease;
+}
+.k9 .skip-link:focus {
+  top: 1rem;
+}
+
+/* Fine survey grid used behind the hero network and research chart */
+.k9 .survey-grid {
+  background-image:
+    linear-gradient(to right, rgba(167, 189, 180, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(167, 189, 180, 0.08) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* Range inputs in the interactive demos */
+.k9 input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 28px;
+  background: transparent;
+  cursor: pointer;
+}
+.k9 input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, #43c2b1 var(--fill, 50%), rgba(167, 189, 180, 0.3) var(--fill, 50%));
+}
+.k9 input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(167, 189, 180, 0.3);
+}
+.k9 input[type="range"]::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: #43c2b1;
+}
+.k9 input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  margin-top: -8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #f8faf6;
+  border: 2px solid #43c2b1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s ease;
+}
+.k9 input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+.k9 input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #f8faf6;
+  border: 2px solid #43c2b1;
+}
+
+/* Hero request pulse */
+@keyframes k9-pulse {
+  0% { transform: scale(1); opacity: 0.55; }
+  100% { transform: scale(3.2); opacity: 0; }
+}
+.k9 .pulse-ring {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: k9-pulse 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+@keyframes k9-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+.k9 .breathe {
+  animation: k9-breathe 4s ease-in-out infinite;
+}
+
+html:has(.k9) {
+  scroll-behavior: smooth;
+  scroll-padding-top: 5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:has(.k9) {
+    scroll-behavior: auto;
+  }
+  .k9 .pulse-ring,
+  .k9 .breathe {
+    animation: none;
+  }
+  .k9 *,
+  .k9 *::before,
+  .k9 *::after {
+    transition-duration: 0.01ms !important;
+  }
+}

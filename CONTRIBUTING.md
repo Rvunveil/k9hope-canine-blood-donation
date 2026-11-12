@@ -34,3 +34,11 @@ Thank you for your interest in contributing to K9Hope!
 ## 🤝 Code of Conduct
 
 Please note that this project is released with a Contributor Code of Conduct. By participating in this project you agree to abide by its terms.
+
+## 📚 Project policies
+
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Security policy](SECURITY.md) — report vulnerabilities privately, never in public issues
+- [Roadmap](ROADMAP.md) — planned work you can help with
+- Never commit real donor, patient or owner data. Use clearly fictional data in tests and screenshots.
+- Changes to clinical rules (eligibility, blood compatibility, transfusion) need review by a veterinary professional.

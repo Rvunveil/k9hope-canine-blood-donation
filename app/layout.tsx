@@ -57,7 +57,6 @@ export default function RootLayout({
           <head>
             <link rel="icon" href="/k9hope-paw-icon.svg" />
             <link rel="apple-touch-icon" href="/k9hope-logo-192.png" />
-            <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"></meta>
           </head>
 
           <body className={inter.className}>
