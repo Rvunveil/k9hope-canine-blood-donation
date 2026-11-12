@@ -1,0 +1,21 @@
+name: Idea or feature request
+description: Suggest an improvement to K9HOPE
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Who is affected (pet owners, donor owners, clinics, organisations) and when?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like to happen?
+  - type: checkboxes
+    id: clinical
+    attributes:
+      label: Clinical impact
+      options:
+        - label: This touches clinical rules (eligibility, compatibility, transfusion) and needs review by a veterinary professional

@@ -1,22 +1,43 @@
-"use client";
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import type { Metadata } from "next";
+import { LandingPage } from "@/components/landing/LandingPage";
+
+export const metadata: Metadata = {
+  title: "K9HOPE: Open-source canine blood donation network",
+  description:
+    "K9HOPE connects dogs that need blood with eligible canine donors, supports veterinary coordination, and publishes research on forecasting sparse blood demand. Open source, started in Chennai.",
+  alternates: { canonical: "https://k9hope.in" },
+  openGraph: {
+    title: "K9HOPE: Every second matters. Every donor can change a life.",
+    description:
+      "An open-source canine blood donation network with veterinary coordination, donor matching and award-winning forecasting research.",
+    url: "https://k9hope.in",
+    siteName: "K9HOPE",
+    locale: "en_IN",
+    type: "website",
+    images: [{ url: "/og-image.png", width: 1200, height: 630, alt: "K9HOPE donor network illustration" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "K9HOPE: Open-source canine blood donation network",
+    description: "Connecting dogs that need blood with eligible donors. Started in Chennai, built in the open.",
+    images: ["/og-image.png"],
+  },
+};
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: "K9HOPE",
+  url: "https://k9hope.in",
+  description: "Open-source canine blood donation and management platform originating in Chennai, India.",
+  sameAs: ["https://github.com/Rvunveil/k9hope-canine-blood-donation"],
+};
 
 export default function HomePage() {
-    const router = useRouter();
-
-    useEffect(() => {
-        // Redirect to login page immediately
-        router.replace("/login");
-    }, [router]);
-
-    // Show minimal loading during redirect
-    return (
-        <div className="min-h-screen flex items-center justify-center bg-white">
-            <div className="text-center">
-                <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                <p className="text-gray-600">Loading K9Hope...</p>
-            </div>
-        </div>
-    );
+  return (
+    <>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      <LandingPage />
+    </>
+  );
 }

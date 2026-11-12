@@ -1,0 +1,32 @@
+name: Bug report
+description: Something in K9HOPE is not working as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve K9HOPE. Please do not include real donor, patient or owner details. Security problems should be reported privately (see SECURITY.md).
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Public website, Donor portal, Pet owner portal, Clinic portal, Organisation portal, Forecasting, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Go to ...\n2. Click ...\n3. See ..."
+  - type: input
+    id: env
+    attributes:
+      label: Device and browser
+      placeholder: e.g. Android 14, Chrome 130

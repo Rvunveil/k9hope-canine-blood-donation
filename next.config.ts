@@ -19,15 +19,6 @@ const nextConfig = {
   experimental: {
     // serverActions is enabled by default // Ensure APIs work properly in App Router
   },
-  async redirects() {
-    return [
-      {
-        source: '/',
-        destination: '/login',
-        permanent: false, // false = 307 temporary redirect
-      },
-    ];
-  },
   // Add webpack config to ignore missing modules
   webpack: (config, { isServer }) => {
     // Ignore missing modules during build
